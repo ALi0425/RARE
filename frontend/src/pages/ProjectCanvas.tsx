@@ -128,16 +128,51 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     });
   }, [setNodes]);
 
-  // ── onNodesChange wrapper: forward changes + recalc containers on every pos/dim change ──
+  // ── Pure function: recalc container sizes from an array of nodes ──
+  function recalcContainers(nds: Node[]): Node[] {
+    let changed = false;
+    const updated = nds.map((n) => {
+      if (n.type !== "module" && n.type !== "page") return n;
+      const minW = n.type === "module" ? 160 : 120;
+      const minH = 36;
+      const { w, h } = computeFluidBounds(nds, n.id, minW, minH);
+      const prev = prevSizesRef.current.get(n.id);
+      if (prev && prev.w === w && prev.h === h) return n;
+      changed = true;
+      prevSizesRef.current.set(n.id, { w, h });
+      return { ...n, style: { ...(n.style || {}), width: w, height: h } };
+    });
+    return changed ? updated : nds;
+  }
+
+  // ── onNodesChange wrapper: apply changes + recalc containers in ONE setNodes call ──
   const handleNodesChange = useCallback(
     (changes: any[]) => {
-      onNodesChange(changes);
-      const hasPosDim = changes.some((c: any) => c.type === "position" || c.type === "dimensions");
-      if (hasPosDim) {
-        requestAnimationFrame(() => recalcFluidBounds());
-      }
+      setNodes((prev) => {
+        // Step 1: apply all changes to get latest positions
+        let updated = [...prev];
+        for (const ch of changes) {
+          if (ch.type === "position") {
+            const i = updated.findIndex((n) => n.id === ch.id);
+            if (i !== -1) updated[i] = { ...updated[i], position: ch.position || updated[i].position };
+          } else if (ch.type === "dimensions") {
+            // pass — dimensions are read-only in React Flow
+          } else if (ch.type === "remove") {
+            updated = updated.filter((n) => n.id !== ch.id);
+          } else if (ch.type === "select") {
+            const i = updated.findIndex((n) => n.id === ch.id);
+            if (i !== -1) updated[i] = { ...updated[i], selected: ch.selected };
+          } else if (ch.type === "add") {
+            updated.push(ch.item);
+          } else if (ch.type === "replace") {
+            updated = updated.map((n) => (n.id === ch.id ? ch.item : n));
+          }
+        }
+        // Step 2: recalc container sizes on the same (fresh) array
+        return recalcContainers(updated);
+      });
     },
-    [onNodesChange, recalcFluidBounds],
+    [setNodes],
   );
 
   // ── API helpers ──────────────────────────────────────────────────
