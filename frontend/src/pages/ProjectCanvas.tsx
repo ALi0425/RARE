@@ -109,7 +109,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
       const updated = nds.map((n) => {
         if (n.type !== "module" && n.type !== "page") return n;
         const minW = n.type === "module" ? 160 : 120;
-        const minH = n.type === "module" ? 36 : 36;
+        const minH = 36;
         const { w, h } = computeFluidBounds(nds, n.id, minW, minH);
         const prev = prevSizesRef.current.get(n.id);
         if (prev && prev.w === w && prev.h === h) return n;
@@ -121,7 +121,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
             ...(n.style || {}),
             width: w,
             height: h,
-            transition: "none",
           },
         };
       });
@@ -129,10 +128,17 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     });
   }, [setNodes]);
 
-  // Re-run fluid bounds whenever nodes change (drag, detach, inject etc.)
-  useEffect(() => {
-    recalcFluidBounds();
-  }, [nodes, recalcFluidBounds]);
+  // ── onNodesChange wrapper: forward changes + recalc containers on every pos/dim change ──
+  const handleNodesChange = useCallback(
+    (changes: any[]) => {
+      onNodesChange(changes);
+      const hasPosDim = changes.some((c: any) => c.type === "position" || c.type === "dimensions");
+      if (hasPosDim) {
+        requestAnimationFrame(() => recalcFluidBounds());
+      }
+    },
+    [onNodesChange, recalcFluidBounds],
+  );
 
   // ── API helpers ──────────────────────────────────────────────────
   const updateEntityParent = useCallback(
@@ -184,71 +190,39 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     return { x, y };
   }, []);
 
-  // ── Space+drag detach + fluid bounds ───────────────────────────
+  // ── Space+drag: detach child from parent (fluid bounds handled by handleNodesChange) ──
   const onNodeDrag = useCallback(
     (_event: any, node: Node) => {
+      if (!spaceRef.current || !node.parentId) return;
+
       setNodes((nds) => {
-        // First, sync the dragged node's position in state so computeFluidBounds
-        // uses the latest coordinates (React Flow may not propagate to nds in time)
-        let updated = nds.map((n) =>
-          n.id === node.id ? { ...n, position: node.position } : n,
+        const parent = nds.find((n) => n.id === node.parentId);
+        if (!parent) return nds;
+
+        const parentW = Number(parent.style?.width) || 160;
+        const parentH = Number(parent.style?.height) || 36;
+        const cw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
+        const ch = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
+
+        const outside =
+          node.position.x < -30 ||
+          node.position.y < -30 ||
+          node.position.x + cw > parentW + 30 ||
+          node.position.y + ch > parentH + 30;
+
+        if (!outside) return nds;
+
+        const absX = parent.position.x + node.position.x;
+        const absY = parent.position.y + node.position.y;
+
+        updateEntityParent(node.id, node.type, null);
+        updateEntityPosition(node.id, node.type, absX, absY);
+
+        return nds.map((n) =>
+          n.id === node.id
+            ? { ...n, parentId: undefined, position: { x: absX, y: absY }, data: { ...n.data, isFloating: true } }
+            : n,
         );
-
-        const parentId = node.parentId;
-        if (!parentId) return updated;
-
-        const parent = updated.find((n) => n.id === parentId);
-        if (!parent || (parent.type !== "module" && parent.type !== "page")) return updated;
-
-        let needsDetach = false;
-        let absX = 0, absY = 0;
-
-        // ── Space+drag: detach when child exits parent boundary ──
-        if (spaceRef.current) {
-          const parentW = Number(parent.style?.width) || 160;
-          const parentH = Number(parent.style?.height) || 36;
-          const cw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
-          const ch = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
-
-          const outside =
-            node.position.x < -30 ||
-            node.position.y < -30 ||
-            node.position.x + cw > parentW + 30 ||
-            node.position.y + ch > parentH + 30;
-
-          if (outside) {
-            needsDetach = true;
-            absX = parent.position.x + node.position.x;
-            absY = parent.position.y + node.position.y;
-            updateEntityParent(node.id, node.type, null);
-            updateEntityPosition(node.id, node.type, absX, absY);
-          }
-        }
-
-        // Apply detach if needed
-        if (needsDetach) {
-          updated = updated.map((n) =>
-            n.id === node.id
-              ? { ...n, parentId: undefined, position: { x: absX, y: absY }, data: { ...n.data, isFloating: true } }
-              : n,
-          );
-        }
-
-        // ── Fluid bounds: resize parent to wrap its children ──
-        const minW = parent.type === "module" ? 160 : 120;
-        const minH = 36;
-        const { w, h } = computeFluidBounds(updated, parentId, minW, minH);
-        const prev = prevSizesRef.current.get(parentId);
-        if (!prev || prev.w !== w || prev.h !== h) {
-          prevSizesRef.current.set(parentId, { w, h });
-          updated = updated.map((n) =>
-            n.id === parentId
-              ? { ...n, style: { ...n.style, width: w, height: h, transition: "none" } }
-              : n,
-          );
-        }
-
-        return updated;
       });
     },
     [setNodes, updateEntityParent, updateEntityPosition],
@@ -326,8 +300,10 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
 
         return nds;
       });
+      // Always recheck container sizes after drag stop
+      requestAnimationFrame(() => recalcFluidBounds());
     },
-    [setNodes, updateEntityParent, updateEntityPosition, getNodeAbsPosition],
+    [setNodes, updateEntityParent, updateEntityPosition, getNodeAbsPosition, recalcFluidBounds],
   );
 
   // ── Orphan protection on delete ────────────────────────────────
@@ -366,6 +342,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
           updateEntityParent(orphan.id, orphan.type, null);
         }
       }
+      if (orphans.length > 0) requestAnimationFrame(() => recalcFluidBounds());
 
       for (const node of deletedNodes) {
         if (node.type === "module") {
@@ -858,7 +835,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
+          onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeDrag={onNodeDrag}
