@@ -15,7 +15,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { FullProject } from "../types";
 import { projectsApi, parseApi, assetsApi } from "../api";
-import { ModuleNode, PageNode, FieldNode, ActionNode } from "../components/canvas/Nodes";
+import { ModuleNode, PageNode, FieldNode, ActionNode, setOnLabelSave } from "../components/canvas/Nodes";
 
 const nodeTypes = {
   module: ModuleNode,
@@ -44,21 +44,29 @@ function nodeDefaultSize(type?: string, label = "", hasExtra = false): { w: numb
   return { w: Math.max(140, textW + 40 + extra), h: 32 };
 }
 
-function computeFluidBounds(nodes: Node[], containerId: string, minW = 400, minH = 200) {
+function computeFluidBounds(nodes: Node[], containerId: string, minW = 160, minH = 36) {
   const children = nodes.filter((n) => n.parentId === containerId);
-  if (children.length === 0) return { w: minW, h: minH };
-  const { maxX, maxY } = children.reduce(
-    (acc, c) => {
-      const cw = Number(c.style?.width) || nodeDefaultSize(c.type, c.data?.label).w;
-      const ch = Number(c.style?.height) || nodeDefaultSize(c.type, c.data?.label).h;
-      return {
-        maxX: Math.max(acc.maxX, c.position.x + cw),
-        maxY: Math.max(acc.maxY, c.position.y + ch),
-      };
-    },
-    { maxX: 0, maxY: 0 },
-  );
-  return { w: Math.max(maxX + 40, minW), h: Math.max(maxY + 40, minH) };
+  if (children.length === 0) return { x: 0, y: 0, w: minW, h: minH };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const c of children) {
+    const cw = Number(c.style?.width) || nodeDefaultSize(c.type, c.data?.label).w;
+    const ch = Number(c.style?.height) || nodeDefaultSize(c.type, c.data?.label).h;
+    if (c.position.x < minX) minX = c.position.x;
+    if (c.position.y < minY) minY = c.position.y;
+    const rx = c.position.x + cw;
+    const by = c.position.y + ch;
+    if (rx > maxX) maxX = rx;
+    if (by > maxY) maxY = by;
+  }
+  // If children shifted up/left, parent needs to expand in that direction
+  const offsetX = Math.max(0, minX < 0 ? -minX + 20 : 0);
+  const offsetY = Math.max(0, minY < 0 ? -minY + 20 : 0);
+  return {
+    x: offsetX,
+    y: offsetY,
+    w: Math.max(maxX + 40 + offsetX, minW),
+    h: Math.max(maxY + 40 + offsetY, minH),
+  };
 }
 
 export default function ProjectCanvas({ projectId, onBack }: Props) {
@@ -101,7 +109,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
   }, []);
 
   // ── Fluid bounds auto-resize containers ────────────────────────
-  const prevSizesRef = useRef<Map<string, { w: number; h: number }>>(new Map());
+  const prevSizesRef = useRef<Map<string, { w: number; h: number; ox: number; oy: number }>>(new Map());
 
   const recalcFluidBounds = useCallback(() => {
     setNodes((nds) => {
@@ -130,17 +138,38 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
 
   // ── Pure function: recalc container sizes from an array of nodes ──
   function recalcContainers(nds: Node[]): Node[] {
+    // Collect all container bounds first (including offsets)
+    const containerBounds = new Map<string, { ox: number; oy: number; w: number; h: number }>();
+    for (const n of nds) {
+      if (n.type !== "module" && n.type !== "page") continue;
+      const minW = n.type === "module" ? 160 : 120;
+      const { x: ox, y: oy, w, h } = computeFluidBounds(nds, n.id, minW, 36);
+      containerBounds.set(n.id, { ox, oy, w, h });
+    }
+
     let changed = false;
     const updated = nds.map((n) => {
-      if (n.type !== "module" && n.type !== "page") return n;
-      const minW = n.type === "module" ? 160 : 120;
-      const minH = 36;
-      const { w, h } = computeFluidBounds(nds, n.id, minW, minH);
+      const bounds = containerBounds.get(n.id);
+      if (!bounds) {
+        // If this node is a child of a shifted parent, shift it too
+        if (n.parentId) {
+          const pb = containerBounds.get(n.parentId);
+          if (pb && (pb.ox > 0 || pb.oy > 0)) {
+            changed = true;
+            return { ...n, position: { x: n.position.x + pb.ox, y: n.position.y + pb.oy } };
+          }
+        }
+        return n;
+      }
       const prev = prevSizesRef.current.get(n.id);
-      if (prev && prev.w === w && prev.h === h) return n;
+      if (prev && prev.w === bounds.w && prev.h === bounds.h && prev.ox === bounds.ox && prev.oy === bounds.oy) return n;
       changed = true;
-      prevSizesRef.current.set(n.id, { w, h });
-      return { ...n, style: { ...(n.style || {}), width: w, height: h } };
+      prevSizesRef.current.set(n.id, { w: bounds.w, h: bounds.h, ox: bounds.ox, oy: bounds.oy } as any);
+      return {
+        ...n,
+        position: { x: n.position.x - bounds.ox, y: n.position.y - bounds.oy },
+        style: { ...(n.style || {}), width: bounds.w, height: bounds.h, transition: "width 0.08s ease, height 0.08s ease" },
+      };
     });
     return changed ? updated : nds;
   }
@@ -322,13 +351,15 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
                 ? { ...n, parentId: container.id, position: { x: relX, y: relY }, data: { ...n.data, isFloating: false } }
                 : n,
             );
-            const { w, h } = computeFluidBounds(withChild, container.id, minW, minH);
-            prevSizesRef.current.set(container.id, { w, h });
+            const { x: ox, y: oy, w, h } = computeFluidBounds(withChild, container.id, minW, minH);
+            prevSizesRef.current.set(container.id, { w, h, ox, oy } as any);
 
             return withChild.map((n) =>
               n.id === container.id
-                ? { ...n, style: { ...n.style, width: w, height: h, transition: "none" } }
-                : n,
+                ? { ...n, position: { x: n.position.x - ox, y: n.position.y - oy }, style: { ...n.style, width: w, height: h, transition: "width 0.08s ease, height 0.08s ease" } }
+                : n.id === node.id
+                  ? { ...n, position: { x: n.position.x + ox, y: n.position.y + oy } }
+                  : n,
             );
           }
         }
@@ -404,6 +435,28 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
       console.error(err);
     }
   }, [projectId]);
+
+  // ── Inline label editing ───────────────────────────────────────
+  const onLabelSave = useCallback((nodeId: string, label: string) => {
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === nodeId ? { ...n, data: { ...n.data, label } } : n,
+      ),
+    );
+    // Persist to API
+    const node = nodesRef.current.find((n) => n.id === nodeId);
+    if (node?.type === "module") {
+      assetsApi.updateModule(projectId, nodeId, { name: label }).catch(() => {});
+    } else if (node?.type === "page") {
+      assetsApi.updatePage(projectId, nodeId, { name: label }).catch(() => {});
+    } else if (node?.type === "field") {
+      assetsApi.updateField(projectId, nodeId, { name: label }).catch(() => {});
+    } else if (node?.type === "action") {
+      assetsApi.updateAction(projectId, nodeId, { name: label }).catch(() => {});
+    }
+  }, [setNodes, projectId]);
+
+  useEffect(() => { setOnLabelSave(onLabelSave); return () => setOnLabelSave(null as any); }, [onLabelSave]);
 
   useEffect(() => {
     loadProject();

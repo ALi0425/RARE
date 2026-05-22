@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import type { Node } from "@xyflow/react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 export type ModuleNodeData = Node<{ label: string; description?: string; isHighlighted?: boolean }>;
 export type PageNodeData = Node<{ label: string; isHighlighted?: boolean }>;
@@ -21,6 +22,61 @@ const TYPE_LABEL = {
   action: "操作",
 } as const;
 
+/* ── Inline label editing: global callback set by ProjectCanvas ── */
+let _onLabelSave: ((nodeId: string, label: string) => void) | null = null;
+export function setOnLabelSave(fn: (nodeId: string, label: string) => void) { _onLabelSave = fn; }
+
+/* ── Editable inline label ────────────────────────────────────── */
+function EditableLabel({ value, onChange, accent }: { value: string; onChange: (v: string) => void; accent: string }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const commit = useCallback(() => {
+    setEditing(false);
+    if (draft.trim() && draft !== value) onChange(draft.trim());
+    else setDraft(value);
+  }, [draft, value, onChange]);
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(value); setEditing(false); } }}
+        style={{
+          background: `${accent}08`,
+          border: `1px solid ${accent}50`,
+          borderRadius: 4,
+          color: accent,
+          fontSize: 10,
+          fontWeight: 600,
+          padding: "0 4px",
+          outline: "none",
+          width: "100%",
+          minWidth: 40,
+          boxSizing: "border-box",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      />
+    );
+  }
+  return (
+    <span
+      style={{ overflow: "hidden", textOverflow: "ellipsis", flex: 1, cursor: "text" }}
+      onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); setDraft(value); }}
+    >
+      {value}
+    </span>
+  );
+}
+
 /* ── Unified node box for ALL types: Module / Page / Field / Action ──
  *   Every node is a thin‑bordered glass box with a colored edge.
  *   Containers (module/page) are bigger and enclose children.
@@ -31,13 +87,14 @@ interface NodeBoxProps {
   accent: string;
   typeLabel: string;
   label: string;
+  nodeId: string;
   description?: string;
   isHighlighted?: boolean;
   isFloating?: boolean;
   children?: React.ReactNode;
 }
 
-function NodeBox({ accent, typeLabel, label, description, isHighlighted, isFloating, children }: NodeBoxProps) {
+function NodeBox({ accent, typeLabel, label, nodeId, description, isHighlighted, isFloating, children }: NodeBoxProps) {
   return (
     <div
       style={{
@@ -85,7 +142,9 @@ function NodeBox({ accent, typeLabel, label, description, isHighlighted, isFloat
         }}
       >
         <span style={{ fontSize: 7, opacity: 0.5 }}>◆</span>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>{label}</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
+          <EditableLabel value={label} onChange={(v) => _onLabelSave?.(nodeId, v)} accent={accent} />
+        </span>
       </div>
 
       {description && (
@@ -136,9 +195,9 @@ const handleStyle: React.CSSProperties = {
 };
 
 /* ── Module ────────────────────────────────────────────────────── */
-export function ModuleNode({ data }: NodeProps<ModuleNodeData>) {
+export function ModuleNode({ data, id }: NodeProps<ModuleNodeData>) {
   return (
-    <NodeBox accent={ACCENT.module} typeLabel={TYPE_LABEL.module} label={data.label} description={data.description} isHighlighted={data.isHighlighted}>
+    <NodeBox accent={ACCENT.module} typeLabel={TYPE_LABEL.module} label={data.label} nodeId={id} description={data.description} isHighlighted={data.isHighlighted}>
       <Handle type="target" position={Position.Top} id="top-t" style={{ ...handleStyle, background: ACCENT.module, top: -4 }} />
       <Handle type="source" position={Position.Bottom} id="bottom-s" style={{ ...handleStyle, background: ACCENT.module, bottom: -4 }} />
       <Handle type="target" position={Position.Left} id="left-t" style={{ ...handleStyle, background: ACCENT.module, left: -4 }} />
@@ -148,9 +207,9 @@ export function ModuleNode({ data }: NodeProps<ModuleNodeData>) {
 }
 
 /* ── Page ──────────────────────────────────────────────────────── */
-export function PageNode({ data }: NodeProps<PageNodeData>) {
+export function PageNode({ data, id }: NodeProps<PageNodeData>) {
   return (
-    <NodeBox accent={ACCENT.page} typeLabel={TYPE_LABEL.page} label={data.label} isHighlighted={data.isHighlighted}>
+    <NodeBox accent={ACCENT.page} typeLabel={TYPE_LABEL.page} label={data.label} nodeId={id} isHighlighted={data.isHighlighted}>
       <Handle type="target" position={Position.Top} id="top-t" style={{ ...handleStyle, background: ACCENT.page, top: -4 }} />
       <Handle type="source" position={Position.Bottom} id="bottom-s" style={{ ...handleStyle, background: ACCENT.page, bottom: -4 }} />
       <Handle type="target" position={Position.Left} id="left-t" style={{ ...handleStyle, background: ACCENT.page, left: -4 }} />
@@ -160,9 +219,9 @@ export function PageNode({ data }: NodeProps<PageNodeData>) {
 }
 
 /* ── Field ─────────────────────────────────────────────────────── */
-export function FieldNode({ data }: NodeProps<FieldNodeData>) {
+export function FieldNode({ data, id }: NodeProps<FieldNodeData>) {
   return (
-    <NodeBox accent={ACCENT.field} typeLabel={TYPE_LABEL.field} label={data.label} isFloating={data.isFloating}>
+    <NodeBox accent={ACCENT.field} typeLabel={TYPE_LABEL.field} label={data.label} nodeId={id} isFloating={data.isFloating}>
       {data.fieldType && (
         <div
           style={{
@@ -193,9 +252,9 @@ export function FieldNode({ data }: NodeProps<FieldNodeData>) {
 }
 
 /* ── Action ────────────────────────────────────────────────────── */
-export function ActionNode({ data }: NodeProps<ActionNodeData>) {
+export function ActionNode({ data, id }: NodeProps<ActionNodeData>) {
   return (
-    <NodeBox accent={ACCENT.action} typeLabel={TYPE_LABEL.action} label={data.label} isFloating={data.isFloating}>
+    <NodeBox accent={ACCENT.action} typeLabel={TYPE_LABEL.action} label={data.label} nodeId={id} isFloating={data.isFloating}>
       {data.actionType && (
         <div
           style={{
