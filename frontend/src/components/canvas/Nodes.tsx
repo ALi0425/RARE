@@ -6,16 +6,7 @@ export type PageNodeData = Node<{ label: string; isHighlighted?: boolean }>;
 export type FieldNodeData = Node<{ label: string; fieldType?: string; isFloating?: boolean }>;
 export type ActionNodeData = Node<{ label: string; actionType?: string; validations?: string[]; isFloating?: boolean }>;
 
-/* ── Unified glass‑morphism base for ALL node types ────────────── */
-const CARD: React.CSSProperties = {
-  background: "rgba(255,255,255,0.78)",
-  backdropFilter: "blur(20px) saturate(1.3)",
-  WebkitBackdropFilter: "blur(20px) saturate(1.3)",
-  border: "1px solid rgba(255,255,255,0.7)",
-  borderRadius: 12,
-  boxShadow: "0 2px 12px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.9)",
-};
-
+/* ── Accent palette ───────────────────────────────────────────── */
 const ACCENT = {
   module: "#0071e3",
   page: "#30d158",
@@ -23,65 +14,90 @@ const ACCENT = {
   action: "#ff3b30",
 } as const;
 
-/* ── Unified Container (Module / Page) ─────────────────────────── */
-// Looks like a pane — accent top bar, children inside, no dashed nonsense.
-function UnifiedContainer({
-  accent,
-  label,
-  description,
-  isHighlighted,
-  children,
-}: {
+const TYPE_LABEL = {
+  module: "模块",
+  page: "页面",
+  field: "字段",
+  action: "操作",
+} as const;
+
+/* ── Unified node box for ALL types: Module / Page / Field / Action ──
+ *   Every node is a thin‑bordered glass box with a colored edge.
+ *   Containers (module/page) are bigger and enclose children.
+ *   Leaf nodes (field/action) are compact inline boxes inside pages.
+ *   ALL share the same visual language — only the accent colour differs.
+ */
+interface NodeBoxProps {
   accent: string;
+  typeLabel: string;
   label: string;
   description?: string;
   isHighlighted?: boolean;
+  isFloating?: boolean;
   children?: React.ReactNode;
-}) {
+}
+
+function NodeBox({ accent, typeLabel, label, description, isHighlighted, isFloating, children }: NodeBoxProps) {
   return (
     <div
       style={{
-        ...CARD,
         width: "100%",
         height: "100%",
-        minHeight: 36,
+        minHeight: 26,
         position: "relative",
         overflow: "visible",
-        borderTop: `3px solid ${accent}`,
+        background: isFloating
+          ? `linear-gradient(135deg, ${accent}08, ${accent}04)`
+          : "rgba(255,255,255,0.72)",
+        backdropFilter: "blur(24px) saturate(1.3)",
+        WebkitBackdropFilter: "blur(24px) saturate(1.3)",
+        border: `1.5px solid ${accent}40`,
+        borderRadius: 10,
         boxShadow: isHighlighted
-          ? `0 0 0 2px ${accent}40, 0 4px 24px ${accent}15`
-          : "0 2px 12px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.9)",
+          ? `inset 0 0 0 2px ${accent}50, 0 0 24px ${accent}20`
+          : isFloating
+            ? `0 0 0 2px ${accent}50, 0 0 16px ${accent}30`
+            : "0 2px 8px rgba(0,0,0,0.04)",
+        transition: "box-shadow 0.15s ease",
       }}
     >
-      {/* Accent label bar at top */}
+      {/* Title chip embedded in the top‑left corner */}
       <div
         style={{
-          height: 24,
-          background: `${accent}10`,
-          borderBottom: `1px solid ${accent}15`,
+          position: "absolute",
+          top: -1,
+          left: -1,
+          zIndex: 10,
           display: "flex",
           alignItems: "center",
-          padding: "0 10px",
-          fontSize: 11,
-          fontWeight: 600,
+          gap: 4,
+          background: `${accent}12`,
           color: accent,
+          fontSize: 10,
+          fontWeight: 600,
+          padding: "1px 8px 1px 6px",
+          borderRadius: "10px 0 10px 0",
           letterSpacing: 0.2,
-          gap: 6,
+          maxWidth: "calc(100% - 4px)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
         }}
       >
-        <span style={{ fontSize: 8, opacity: 0.5, lineHeight: 1 }}>◆</span>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-          {label}
-        </span>
+        <span style={{ fontSize: 7, opacity: 0.5 }}>◆</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>{label}</span>
       </div>
 
       {description && (
         <div
           style={{
-            padding: "4px 10px 0",
+            position: "absolute",
+            top: 20,
+            left: 8,
             fontSize: 9,
-            color: `${accent}65`,
+            color: `${accent}60`,
             lineHeight: 1.3,
+            maxWidth: "calc(100% - 16px)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -91,83 +107,22 @@ function UnifiedContainer({
         </div>
       )}
 
-      {children}
-    </div>
-  );
-}
-
-/* ── Unified Leaf Chip (Field / Action) ────────────────────────── */
-// Same glass aesthetic as containers, just compact.
-function LeafChip({
-  accent,
-  prefix,
-  label,
-  badge,
-  isFloating,
-  extra,
-}: {
-  accent: string;
-  prefix: string;
-  label: string;
-  badge?: string;
-  isFloating?: boolean;
-  extra?: React.ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        ...CARD,
-        borderLeft: `3px solid ${accent}`,
-        padding: "3px 8px",
-        display: "flex",
-        alignItems: "center",
-        gap: 4,
-        width: "100%",
-        height: "100%",
-        minHeight: 26,
-        minWidth: 80,
-        boxSizing: "border-box",
-        background: isFloating ? `${accent}08` : "rgba(255,255,255,0.78)",
-        animation: isFloating ? "floatPulse 1.5s ease-in-out infinite" : "none",
-      }}
-    >
-      <span style={{ fontSize: 10, color: accent, fontWeight: 700, flexShrink: 0, lineHeight: 1 }}>
-        {prefix}
-      </span>
-      <span
-        style={{
-          fontSize: 11,
-          color: "#1d1d1f",
-          fontWeight: 500,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          flex: 1,
-          minWidth: 0,
-        }}
-      >
-        {label}
-      </span>
-      {badge && (
-        <span
-          style={{
-            fontSize: 8,
-            color: "#fff",
-            background: accent,
-            padding: "1px 5px",
-            borderRadius: 3,
-            fontWeight: 600,
-            lineHeight: "14px",
-            flexShrink: 0,
-          }}
-        >
-          {badge}
-        </span>
-      )}
-      {extra}
+      {/* Floating indicator pulse ring */}
       {isFloating && (
-        <span style={{ fontSize: 8, color: accent, fontWeight: 600, flexShrink: 0 }}>● 游离</span>
+        <div
+          style={{
+            position: "absolute",
+            inset: -1,
+            borderRadius: 11,
+            border: `1.5px solid ${accent}`,
+            opacity: 0.4,
+            pointerEvents: "none",
+            animation: "floatPulse 1.5s ease-in-out infinite",
+          }}
+        />
       )}
+
+      {children}
     </div>
   );
 }
@@ -175,52 +130,102 @@ function LeafChip({
 /* ── Module ────────────────────────────────────────────────────── */
 export function ModuleNode({ data }: NodeProps<ModuleNodeData>) {
   return (
-    <UnifiedContainer accent={ACCENT.module} label={data.label} description={data.description} isHighlighted={data.isHighlighted}>
-      <Handle type="target" position={Position.Top} style={{ top: 0 }} />
-      <Handle type="source" position={Position.Bottom} style={{ bottom: 0 }} />
-    </UnifiedContainer>
+    <NodeBox accent={ACCENT.module} typeLabel={TYPE_LABEL.module} label={data.label} description={data.description} isHighlighted={data.isHighlighted}>
+      <Handle type="target" position={Position.Top} style={{ top: -4 }} />
+      <Handle type="source" position={Position.Bottom} style={{ bottom: -4 }} />
+    </NodeBox>
   );
 }
 
 /* ── Page ──────────────────────────────────────────────────────── */
 export function PageNode({ data }: NodeProps<PageNodeData>) {
   return (
-    <UnifiedContainer accent={ACCENT.page} label={data.label} isHighlighted={data.isHighlighted}>
-      <Handle type="target" position={Position.Top} style={{ top: 0 }} />
-      <Handle type="source" position={Position.Bottom} style={{ bottom: 0 }} />
-    </UnifiedContainer>
+    <NodeBox accent={ACCENT.page} typeLabel={TYPE_LABEL.page} label={data.label} isHighlighted={data.isHighlighted}>
+      <Handle type="target" position={Position.Top} style={{ top: -4 }} />
+      <Handle type="source" position={Position.Bottom} style={{ bottom: -4 }} />
+    </NodeBox>
   );
 }
 
 /* ── Field ─────────────────────────────────────────────────────── */
 export function FieldNode({ data }: NodeProps<FieldNodeData>) {
   return (
-    <LeafChip accent={ACCENT.field} prefix="#" label={data.label} badge={data.fieldType} isFloating={data.isFloating}>
-      <Handle type="target" position={Position.Left} style={{ left: -1, width: 6, height: 6 }} />
-      <Handle type="source" position={Position.Right} style={{ right: -1, width: 6, height: 6 }} />
-    </LeafChip>
+    <NodeBox accent={ACCENT.field} typeLabel={TYPE_LABEL.field} label={data.label} isFloating={data.isFloating}>
+      {/* Label chip on the right side */}
+      {data.fieldType && (
+        <div
+          style={{
+            position: "absolute",
+            right: 4,
+            top: "50%",
+            transform: "translateY(-50%)",
+            fontSize: 8,
+            color: "#fff",
+            background: ACCENT.field,
+            padding: "0 5px",
+            borderRadius: 3,
+            lineHeight: "16px",
+            fontWeight: 600,
+            zIndex: 10,
+          }}
+        >
+          {data.fieldType}
+        </div>
+      )}
+      {/* Input/output sockets on left/right for data flow */}
+      <Handle type="target" position={Position.Left} style={{ left: -4, width: 7, height: 7, background: ACCENT.field, border: "1.5px solid #fff" }} />
+      <Handle type="source" position={Position.Right} style={{ right: -4, width: 7, height: 7, background: ACCENT.field, border: "1.5px solid #fff" }} />
+    </NodeBox>
   );
 }
 
 /* ── Action ────────────────────────────────────────────────────── */
 export function ActionNode({ data }: NodeProps<ActionNodeData>) {
   return (
-    <LeafChip
-      accent={ACCENT.action}
-      prefix="▶"
-      label={data.label}
-      badge={data.actionType}
-      isFloating={data.isFloating}
-      extra={
-        data.validations && data.validations.length > 0 ? (
-          <span style={{ fontSize: 9, color: ACCENT.field, flexShrink: 0, lineHeight: 1 }}>
-            🛡️{data.validations.length}
-          </span>
-        ) : undefined
-      }
-    >
-      <Handle type="target" position={Position.Left} style={{ left: -1, width: 6, height: 6 }} />
-      <Handle type="source" position={Position.Right} style={{ right: -1, width: 6, height: 6 }} />
-    </LeafChip>
+    <NodeBox accent={ACCENT.action} typeLabel={TYPE_LABEL.action} label={data.label} isFloating={data.isFloating}>
+      {/* Type badge on the right */}
+      {data.actionType && (
+        <div
+          style={{
+            position: "absolute",
+            right: data.validations?.length ? 20 : 4,
+            top: "50%",
+            transform: "translateY(-50%)",
+            fontSize: 8,
+            color: "#fff",
+            background: data.actionType === "navigation" ? ACCENT.module : data.actionType === "validation" ? ACCENT.field : "#86868b",
+            padding: "0 5px",
+            borderRadius: 3,
+            lineHeight: "16px",
+            fontWeight: 600,
+            zIndex: 10,
+          }}
+        >
+          {data.actionType}
+        </div>
+      )}
+
+      {/* Validation shield */}
+      {data.validations && data.validations.length > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            right: 4,
+            top: "50%",
+            transform: "translateY(-50%)",
+            zIndex: 10,
+            fontSize: 10,
+            color: ACCENT.field,
+            lineHeight: 1,
+          }}
+        >
+          🛡️{data.validations.length}
+        </div>
+      )}
+
+      {/* Input/output sockets */}
+      <Handle type="target" position={Position.Left} style={{ left: -4, width: 7, height: 7, background: ACCENT.action, border: "1.5px solid #fff" }} />
+      <Handle type="source" position={Position.Right} style={{ right: -4, width: 7, height: 7, background: ACCENT.action, border: "1.5px solid #fff" }} />
+    </NodeBox>
   );
 }
