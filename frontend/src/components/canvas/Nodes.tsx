@@ -127,12 +127,22 @@ function NodeBox({ accent, typeLabel, label, description, isHighlighted, isFloat
   );
 }
 
+/* ── Shared small handle style ────────────────────────────────── */
+const handleStyle: React.CSSProperties = {
+  width: 8,
+  height: 8,
+  borderRadius: "50%",
+  border: "2px solid #fff",
+};
+
 /* ── Module ────────────────────────────────────────────────────── */
 export function ModuleNode({ data }: NodeProps<ModuleNodeData>) {
   return (
     <NodeBox accent={ACCENT.module} typeLabel={TYPE_LABEL.module} label={data.label} description={data.description} isHighlighted={data.isHighlighted}>
-      <Handle type="target" position={Position.Top} style={{ top: -4 }} />
-      <Handle type="source" position={Position.Bottom} style={{ bottom: -4 }} />
+      <Handle type="target" position={Position.Top} style={{ ...handleStyle, background: ACCENT.module, top: -4 }} />
+      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle, background: ACCENT.module, bottom: -4 }} />
+      <Handle type="target" position={Position.Left} style={{ ...handleStyle, background: ACCENT.module, left: -4 }} />
+      <Handle type="source" position={Position.Right} style={{ ...handleStyle, background: ACCENT.module, right: -4 }} />
     </NodeBox>
   );
 }
@@ -141,8 +151,10 @@ export function ModuleNode({ data }: NodeProps<ModuleNodeData>) {
 export function PageNode({ data }: NodeProps<PageNodeData>) {
   return (
     <NodeBox accent={ACCENT.page} typeLabel={TYPE_LABEL.page} label={data.label} isHighlighted={data.isHighlighted}>
-      <Handle type="target" position={Position.Top} style={{ top: -4 }} />
-      <Handle type="source" position={Position.Bottom} style={{ bottom: -4 }} />
+      <Handle type="target" position={Position.Top} style={{ ...handleStyle, background: ACCENT.page, top: -4 }} />
+      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle, background: ACCENT.page, bottom: -4 }} />
+      <Handle type="target" position={Position.Left} style={{ ...handleStyle, background: ACCENT.page, left: -4 }} />
+      <Handle type="source" position={Position.Right} style={{ ...handleStyle, background: ACCENT.page, right: -4 }} />
     </NodeBox>
   );
 }
@@ -151,7 +163,6 @@ export function PageNode({ data }: NodeProps<PageNodeData>) {
 export function FieldNode({ data }: NodeProps<FieldNodeData>) {
   return (
     <NodeBox accent={ACCENT.field} typeLabel={TYPE_LABEL.field} label={data.label} isFloating={data.isFloating}>
-      {/* Label chip on the right side */}
       {data.fieldType && (
         <div
           style={{
@@ -167,14 +178,16 @@ export function FieldNode({ data }: NodeProps<FieldNodeData>) {
             lineHeight: "16px",
             fontWeight: 600,
             zIndex: 10,
+            pointerEvents: "none",
           }}
         >
           {data.fieldType}
         </div>
       )}
-      {/* Input/output sockets on left/right for data flow */}
-      <Handle type="target" position={Position.Left} style={{ left: -4, width: 7, height: 7, background: ACCENT.field, border: "1.5px solid #fff" }} />
-      <Handle type="source" position={Position.Right} style={{ right: -4, width: 7, height: 7, background: ACCENT.field, border: "1.5px solid #fff" }} />
+      <Handle type="target" position={Position.Top} style={{ ...handleStyle, background: ACCENT.field, top: -4 }} />
+      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle, background: ACCENT.field, bottom: -4 }} />
+      <Handle type="target" position={Position.Left} style={{ ...handleStyle, background: ACCENT.field, left: -4 }} />
+      <Handle type="source" position={Position.Right} style={{ ...handleStyle, background: ACCENT.field, right: -4 }} />
     </NodeBox>
   );
 }
@@ -183,7 +196,6 @@ export function FieldNode({ data }: NodeProps<FieldNodeData>) {
 export function ActionNode({ data }: NodeProps<ActionNodeData>) {
   return (
     <NodeBox accent={ACCENT.action} typeLabel={TYPE_LABEL.action} label={data.label} isFloating={data.isFloating}>
-      {/* Type badge on the right */}
       {data.actionType && (
         <div
           style={{
@@ -199,13 +211,13 @@ export function ActionNode({ data }: NodeProps<ActionNodeData>) {
             lineHeight: "16px",
             fontWeight: 600,
             zIndex: 10,
+            pointerEvents: "none",
           }}
         >
           {data.actionType}
         </div>
       )}
 
-      {/* Validation shield */}
       {data.validations && data.validations.length > 0 && (
         <div
           style={{
@@ -217,15 +229,17 @@ export function ActionNode({ data }: NodeProps<ActionNodeData>) {
             fontSize: 10,
             color: ACCENT.field,
             lineHeight: 1,
+            pointerEvents: "none",
           }}
         >
           🛡️{data.validations.length}
         </div>
       )}
 
-      {/* Input/output sockets */}
-      <Handle type="target" position={Position.Left} style={{ left: -4, width: 7, height: 7, background: ACCENT.action, border: "1.5px solid #fff" }} />
-      <Handle type="source" position={Position.Right} style={{ right: -4, width: 7, height: 7, background: ACCENT.action, border: "1.5px solid #fff" }} />
+      <Handle type="target" position={Position.Top} style={{ ...handleStyle, background: ACCENT.action, top: -4 }} />
+      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle, background: ACCENT.action, bottom: -4 }} />
+      <Handle type="target" position={Position.Left} style={{ ...handleStyle, background: ACCENT.action, left: -4 }} />
+      <Handle type="source" position={Position.Right} style={{ ...handleStyle, background: ACCENT.action, right: -4 }} />
     </NodeBox>
   );
 }
