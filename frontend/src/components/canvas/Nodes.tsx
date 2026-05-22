@@ -139,10 +139,10 @@ const handleStyle: React.CSSProperties = {
 export function ModuleNode({ data }: NodeProps<ModuleNodeData>) {
   return (
     <NodeBox accent={ACCENT.module} typeLabel={TYPE_LABEL.module} label={data.label} description={data.description} isHighlighted={data.isHighlighted}>
-      <Handle type="target" position={Position.Top} style={{ ...handleStyle, background: ACCENT.module, top: -4 }} />
-      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle, background: ACCENT.module, bottom: -4 }} />
-      <Handle type="target" position={Position.Left} style={{ ...handleStyle, background: ACCENT.module, left: -4 }} />
-      <Handle type="source" position={Position.Right} style={{ ...handleStyle, background: ACCENT.module, right: -4 }} />
+      <Handle type="target" position={Position.Top} id="top-t" style={{ ...handleStyle, background: ACCENT.module, top: -4 }} />
+      <Handle type="source" position={Position.Bottom} id="bottom-s" style={{ ...handleStyle, background: ACCENT.module, bottom: -4 }} />
+      <Handle type="target" position={Position.Left} id="left-t" style={{ ...handleStyle, background: ACCENT.module, left: -4 }} />
+      <Handle type="source" position={Position.Right} id="right-s" style={{ ...handleStyle, background: ACCENT.module, right: -4 }} />
     </NodeBox>
   );
 }
@@ -151,10 +151,10 @@ export function ModuleNode({ data }: NodeProps<ModuleNodeData>) {
 export function PageNode({ data }: NodeProps<PageNodeData>) {
   return (
     <NodeBox accent={ACCENT.page} typeLabel={TYPE_LABEL.page} label={data.label} isHighlighted={data.isHighlighted}>
-      <Handle type="target" position={Position.Top} style={{ ...handleStyle, background: ACCENT.page, top: -4 }} />
-      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle, background: ACCENT.page, bottom: -4 }} />
-      <Handle type="target" position={Position.Left} style={{ ...handleStyle, background: ACCENT.page, left: -4 }} />
-      <Handle type="source" position={Position.Right} style={{ ...handleStyle, background: ACCENT.page, right: -4 }} />
+      <Handle type="target" position={Position.Top} id="top-t" style={{ ...handleStyle, background: ACCENT.page, top: -4 }} />
+      <Handle type="source" position={Position.Bottom} id="bottom-s" style={{ ...handleStyle, background: ACCENT.page, bottom: -4 }} />
+      <Handle type="target" position={Position.Left} id="left-t" style={{ ...handleStyle, background: ACCENT.page, left: -4 }} />
+      <Handle type="source" position={Position.Right} id="right-s" style={{ ...handleStyle, background: ACCENT.page, right: -4 }} />
     </NodeBox>
   );
 }
@@ -184,10 +184,10 @@ export function FieldNode({ data }: NodeProps<FieldNodeData>) {
           {data.fieldType}
         </div>
       )}
-      <Handle type="target" position={Position.Top} style={{ ...handleStyle, background: ACCENT.field, top: -4 }} />
-      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle, background: ACCENT.field, bottom: -4 }} />
-      <Handle type="target" position={Position.Left} style={{ ...handleStyle, background: ACCENT.field, left: -4 }} />
-      <Handle type="source" position={Position.Right} style={{ ...handleStyle, background: ACCENT.field, right: -4 }} />
+      <Handle type="target" position={Position.Top} id="top-t" style={{ ...handleStyle, background: ACCENT.field, top: -4 }} />
+      <Handle type="source" position={Position.Bottom} id="bottom-s" style={{ ...handleStyle, background: ACCENT.field, bottom: -4 }} />
+      <Handle type="target" position={Position.Left} id="left-t" style={{ ...handleStyle, background: ACCENT.field, left: -4 }} />
+      <Handle type="source" position={Position.Right} id="right-s" style={{ ...handleStyle, background: ACCENT.field, right: -4 }} />
     </NodeBox>
   );
 }
@@ -236,10 +236,10 @@ export function ActionNode({ data }: NodeProps<ActionNodeData>) {
         </div>
       )}
 
-      <Handle type="target" position={Position.Top} style={{ ...handleStyle, background: ACCENT.action, top: -4 }} />
-      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle, background: ACCENT.action, bottom: -4 }} />
-      <Handle type="target" position={Position.Left} style={{ ...handleStyle, background: ACCENT.action, left: -4 }} />
-      <Handle type="source" position={Position.Right} style={{ ...handleStyle, background: ACCENT.action, right: -4 }} />
+      <Handle type="target" position={Position.Top} id="top-t" style={{ ...handleStyle, background: ACCENT.action, top: -4 }} />
+      <Handle type="source" position={Position.Bottom} id="bottom-s" style={{ ...handleStyle, background: ACCENT.action, bottom: -4 }} />
+      <Handle type="target" position={Position.Left} id="left-t" style={{ ...handleStyle, background: ACCENT.action, left: -4 }} />
+      <Handle type="source" position={Position.Right} id="right-s" style={{ ...handleStyle, background: ACCENT.action, right: -4 }} />
     </NodeBox>
   );
 }

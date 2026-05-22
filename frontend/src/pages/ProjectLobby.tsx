@@ -165,8 +165,8 @@ export default function ProjectLobby({ onSelectProject }: Props) {
         {/* Project grid */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-          gap: 16,
+          gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
+          gap: 20,
         }}>
           {/* New project card */}
           {tab === "active" && !showCreate && filtered.length > 0 && (
@@ -179,7 +179,7 @@ export default function ProjectLobby({ onSelectProject }: Props) {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                minHeight: 160,
+                minHeight: 200,
                 cursor: "pointer",
                 color: "#86868b",
                 fontSize: 14,
@@ -282,7 +282,7 @@ export default function ProjectLobby({ onSelectProject }: Props) {
               onClick={() => onSelectProject(p.id)}
               className="glass"
               style={{
-                padding: 24,
+                padding: 28,
                 cursor: "pointer",
                 transition: "all 0.25s ease",
                 opacity: p.status === "archived" ? 0.6 : 1,
