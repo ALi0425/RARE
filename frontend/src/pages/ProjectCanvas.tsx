@@ -229,7 +229,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         if (needsDetach) {
           updated = updated.map((n) =>
             n.id === node.id
-              ? { ...n, parentId: undefined, position: { x: absX, y: absY }, data: { ...n.data, isFloating: true } }
+              ? { ...n, parentId: undefined, extent: undefined, position: { x: absX, y: absY }, data: { ...n.data, isFloating: true } }
               : n,
           );
         }
@@ -310,7 +310,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
             // Temporarily attach child to compute new parent bounds
             const withChild = nds.map((n) =>
               n.id === node.id
-                ? { ...n, parentId: container.id, position: { x: relX, y: relY }, data: { ...n.data, isFloating: false } }
+                ? { ...n, parentId: container.id, extent: "parent" as const, position: { x: relX, y: relY }, data: { ...n.data, isFloating: false } }
                 : n,
             );
             const { w, h } = computeFluidBounds(withChild, container.id, minW, minH);
@@ -352,6 +352,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
               return {
                 ...orphan,
                 parentId: undefined,
+                extent: undefined,
                 position: {
                   x: parent ? parent.position.x + orphan.position.x : orphan.position.x,
                   y: parent ? parent.position.y + orphan.position.y : orphan.position.y,
@@ -530,6 +531,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: p.name },
         parentId: p.moduleId || undefined,
+        extent: p.moduleId ? "parent" as const : undefined,
         style: { width: ps.w, height: ps.h, overflow: "visible", transition: "none" },
       });
     }
@@ -546,6 +548,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: f.name, fieldType: f.fieldType },
         parentId: f.pageId || undefined,
+        extent: f.pageId ? "parent" as const : undefined,
         style: { width: w, height: h },
       });
     }
@@ -562,6 +565,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: a.name, actionType: a.actionType, validations: a.validations },
         parentId: a.pageId || undefined,
+        extent: a.pageId ? "parent" as const : undefined,
         style: { width: w, height: h },
       });
     }
