@@ -1,0 +1,52 @@
+{
+  "name": "RARE Document Parser",
+  "nodes": [
+    {
+      "id": "webhook-in",
+      "name": "Receive Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rare-parse",
+        "options": {},
+        "responseMode": "lastNode",
+        "responseData": "allEntries"
+      }
+    },
+    {
+      "id": "code-prompt",
+      "name": "Build Prompt & Call API",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300],
+      "parameters": {
+        "language": "javaScript",
+        "code": "const text = $input.first().json.body?.text || '';\nconst apiKey = process.env.LLM_API_KEY || '';\nconst apiUrl = process.env.LLM_API_URL || 'https://api.anthropic.com/v1/messages';\nconst model = process.env.LLM_MODEL || 'claude-sonnet-4-20250514';\n\nconst systemPrompt = `You are a system reverse engineering expert. Analyze the following system documentation and extract:\n1. All system modules, pages, fields, and actions as entities\n2. All business flows and data flows between them as edges\n\nRULES:\n- Only extract entities and relationships that are EXPLICITLY described in the text\n- Return valid JSON only\n\nOUTPUT FORMAT:\n{\n  \"entities\": [\n    { \"name\": \"...\", \"type\": \"module\", \"parentName\": null },\n    { \"name\": \"...\", \"type\": \"page\", \"parentName\": \"module name\" },\n    { \"name\": \"...\", \"type\": \"field\", \"parentName\": \"page name\", \"fieldType\": \"string\" },\n    { \"name\": \"...\", \"type\": \"action\", \"parentName\": \"page name\", \"actionType\": \"operation\" }\n  ],\n  \"edges\": [\n    { \"sourceName\": \"...\", \"targetName\": \"...\", \"sourceType\": \"page\", \"targetType\": \"page\", \"flowType\": \"BUSINESS_FLOW\", \"status\": \"extracted\", \"label\": \"...\", \"sourceQuote\": \"...\" }\n  ]\n}`;\n\nconst isOpenAI = apiUrl.includes('openai');\n\nlet requestBody;\nlet headers;\n\nif (isOpenAI) {\n  headers = {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer ' + apiKey\n  };\n  requestBody = {\n    model,\n    max_tokens: 8192,\n    response_format: { type: 'json_object' },\n    messages: [\n      { role: 'system', content: systemPrompt },\n      { role: 'user', content: text }\n    ]\n  };\n} else {\n  headers = {\n    'Content-Type': 'application/json',\n    'x-api-key': apiKey,\n    'anthropic-version': '2023-06-01'\n  };\n  requestBody = {\n    model,\n    max_tokens: 8192,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: text }]\n  };\n}\n\n// Make the API call\nconst response = await fetch(apiUrl, {\n  method: 'POST',\n  headers,\n  body: JSON.stringify(requestBody)\n});\n\nif (!response.ok) {\n  const err = await response.text();\n  throw new Error('API error: ' + response.status + ' ' + err);\n}\n\nconst data = await response.json();\n\n// Parse the response\nlet jsonStr = '';\nif (data.content?.[0]?.text) {\n  jsonStr = data.content[0].text;\n} else if (data.choices?.[0]?.message?.content) {\n  jsonStr = data.choices[0].message.content;\n}\n\nconst jsonMatch = jsonStr.match(/\\{[\\s\\S]*\\}/);\nif (!jsonMatch) {\n  return [{ json: { entities: [], edges: [] } }];\n}\n\nreturn [{ json: JSON.parse(jsonMatch[0]) }];"
+      }
+    },
+    {
+      "id": "webhook-out",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [650, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      }
+    }
+  ],
+  "connections": {
+    "Receive Request": {
+      "main": [[{ "node": "Build Prompt & Call API", "type": "main", "index": 0 }]]
+    },
+    "Build Prompt & Call API": {
+      "main": [[{ "node": "Send Response", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "pinData": {}
+}
