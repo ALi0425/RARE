@@ -241,26 +241,58 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     return (p.type === "module" || p.type === "page") ? containerDepth(p, allNodes) + 1 : 1;
   }, []);
 
+  // ── Throttle for container expansion during drag ────────────────
+  const lastExpandRef = useRef(0);
+
   const onNodeDrag = useCallback(
     (_event: any, node: Node) => {
-      if (!spaceRef.current || !node.parentId) return;
-      if (detachedThisDragRef.current === node.id) return;
-      detachedThisDragRef.current = node.id;
-      spaceUsedThisDragRef.current = true;
+      // ── Space+drag = detach ──
+      if (spaceRef.current) {
+        if (!node.parentId) return;
+        if (detachedThisDragRef.current === node.id) return;
+        detachedThisDragRef.current = node.id;
+        spaceUsedThisDragRef.current = true;
+        const parent = nodesRef.current.find((n) => n.id === node.parentId);
+        if (!parent) return;
+        const absX = parent.position.x + node.position.x;
+        const absY = parent.position.y + node.position.y;
+        updateEntityParent(node.id, node.type, null);
+        updateEntityPosition(node.id, node.type, Math.round(absX), Math.round(absY));
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === node.id
+              ? { ...n, parentId: undefined, position: { x: absX, y: absY }, data: { ...n.data, isFloating: true } }
+              : n,
+          ),
+        );
+        return;
+      }
+
+      // ── Normal drag: throttled container expansion ──
+      if (!node.parentId) return;
+      const now = Date.now();
+      if (now - lastExpandRef.current < 150) return;
 
       const parent = nodesRef.current.find((n) => n.id === node.parentId);
-      if (!parent) return;
-      const absX = parent.position.x + node.position.x;
-      const absY = parent.position.y + node.position.y;
-      updateEntityParent(node.id, node.type, null);
-      updateEntityPosition(node.id, node.type, Math.round(absX), Math.round(absY));
-      setNodes((nds) =>
-        nds.map((n) =>
-          n.id === node.id
-            ? { ...n, parentId: undefined, position: { x: absX, y: absY }, data: { ...n.data, isFloating: true } }
-            : n,
-        ),
-      );
+      if (!parent || (parent.type !== "module" && parent.type !== "page")) return;
+
+      const cw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
+      const ch = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
+      const childR = node.position.x + cw;
+      const childB = node.position.y + ch;
+      const pW = Number(parent.style?.width) || (parent.type === "module" ? 160 : 120);
+      const pH = Number(parent.style?.height) || 36;
+
+      if (childR + 20 > pW || childB + 20 > pH) {
+        lastExpandRef.current = now;
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === parent.id
+              ? { ...n, style: { ...n.style, width: Math.max(pW, childR + 40), height: Math.max(pH, childB + 40) } }
+              : n,
+          ),
+        );
+      }
     },
     [setNodes, updateEntityParent, updateEntityPosition],
   );
@@ -556,7 +588,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         type: "module",
         position: { x: m.posX, y: m.posY },
         data: { label: m.name, description: m.description },
-        style: { width: w, height: h, overflow: "visible", transition: "none" },
+        style: { width: w, height: h, overflow: "visible", transition: "width 0.15s ease, height 0.15s ease" },
       });
     }
 
@@ -573,7 +605,8 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: p.name },
         parentId: p.moduleId || undefined,
-        style: { width: ps.w, height: ps.h, overflow: "visible", transition: "none" },
+        extent: p.moduleId ? ("parent" as const) : undefined,
+        style: { width: ps.w, height: ps.h, overflow: "visible", transition: "width 0.15s ease, height 0.15s ease" },
       });
     }
 
@@ -589,6 +622,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: f.name, fieldType: f.fieldType },
         parentId: f.pageId || undefined,
+        extent: f.pageId ? ("parent" as const) : undefined,
         style: { width: w, height: h },
       });
     }
@@ -605,6 +639,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: a.name, actionType: a.actionType, validations: a.validations },
         parentId: a.pageId || undefined,
+        extent: a.pageId ? ("parent" as const) : undefined,
         style: { width: w, height: h },
       });
     }
