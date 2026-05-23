@@ -168,7 +168,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
       return {
         ...n,
         position: { x: n.position.x - bounds.ox, y: n.position.y - bounds.oy },
-        style: { ...(n.style || {}), width: bounds.w, height: bounds.h, transition: "width 0.08s ease, height 0.08s ease" },
+        style: { ...(n.style || {}), width: bounds.w, height: bounds.h },
       };
     });
     return changed ? updated : nds;
@@ -254,7 +254,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     return { x, y };
   }, []);
 
-  // ── Space+drag: detach child from parent (fluid bounds handled by handleNodesChange) ──
+  // ── Space+drag: detach child from parent immediately (Space signals intent) ──
   const onNodeDrag = useCallback(
     (_event: any, node: Node) => {
       if (!spaceRef.current || !node.parentId) return;
@@ -262,19 +262,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
       setNodes((nds) => {
         const parent = nds.find((n) => n.id === node.parentId);
         if (!parent) return nds;
-
-        const parentW = Number(parent.style?.width) || 160;
-        const parentH = Number(parent.style?.height) || 36;
-        const cw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
-        const ch = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
-
-        const outside =
-          node.position.x < -30 ||
-          node.position.y < -30 ||
-          node.position.x + cw > parentW + 30 ||
-          node.position.y + ch > parentH + 30;
-
-        if (!outside) return nds;
 
         const absX = parent.position.x + node.position.x;
         const absY = parent.position.y + node.position.y;
@@ -307,7 +294,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     }
   }, [nodes]);
 
-  // ── Inject on drop (floating node into container) ──────────────
+  // ── Inject on drop: reparent if child overlaps a container by ≥30% ──
   const onNodeDragStop = useCallback(
     (_event: any, node: Node) => {
       // Space held → keep floating; already inside container → stay
@@ -321,6 +308,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         const absY = node.position.y;
         const nw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
         const nh = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
+        const childArea = nw * nh;
 
         const containers = nds.filter((n) => n.id !== node.id && (n.type === "module" || n.type === "page"));
 
@@ -329,12 +317,13 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
           const cw = Number(container.style?.width) || 160;
           const ch = Number(container.style?.height) || 36;
 
-          if (
-            absX >= cPos.x - 5 &&
-            absY >= cPos.y - 5 &&
-            absX + nw <= cPos.x + cw + 5 &&
-            absY + nh <= cPos.y + ch + 5
-          ) {
+          // Overlap: fraction of child area inside container
+          const ox = Math.max(0, Math.min(absX + nw, cPos.x + cw) - Math.max(absX, cPos.x));
+          const oy = Math.max(0, Math.min(absY + nh, cPos.y + ch) - Math.max(absY, cPos.y));
+          const overlap = ox * oy;
+          const ratio = childArea > 0 ? overlap / childArea : 0;
+
+          if (ratio >= 0.3) {
             const relX = absX - container.position.x;
             const relY = absY - container.position.y;
 
@@ -356,7 +345,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
 
             return withChild.map((n) =>
               n.id === container.id
-                ? { ...n, position: { x: n.position.x - ox, y: n.position.y - oy }, style: { ...n.style, width: w, height: h, transition: "width 0.08s ease, height 0.08s ease" } }
+                ? { ...n, position: { x: n.position.x - ox, y: n.position.y - oy }, style: { ...n.style, width: w, height: h } }
                 : n.id === node.id
                   ? { ...n, position: { x: n.position.x + ox, y: n.position.y + oy } }
                   : n,
