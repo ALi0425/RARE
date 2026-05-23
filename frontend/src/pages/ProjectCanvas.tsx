@@ -230,22 +230,30 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     apis[type]?.({ name: label, posX: node.position.x, posY: node.position.y }).catch(console.warn);
     setNodes((nds) => [...nds, node]);
   }, [setNodes, projectId]);
+  // ── Drag system: Space+drag detach + nested priority inject ──
 
-  // ── Drag: detach on Space+drag (once per drag, ref-guarded) ──
+  // Helper: how deep is a container nested? (canvas-level = 1)
+  const containerDepth = useCallback((n: Node, allNodes: Node[]): number => {
+    if (!n.parentId) return 1;
+    const p = allNodes.find((x) => x.id === n.parentId);
+    if (!p) return 1;
+    // Only count module/page ancestors as depth layers
+    return (p.type === "module" || p.type === "page") ? containerDepth(p, allNodes) + 1 : 1;
+  }, []);
 
   const onNodeDrag = useCallback(
     (_event: any, node: Node) => {
       if (!spaceRef.current || !node.parentId) return;
-      // Guard: only detach once per drag session
       if (detachedThisDragRef.current === node.id) return;
       detachedThisDragRef.current = node.id;
+      spaceUsedThisDragRef.current = true;
 
       const parent = nodesRef.current.find((n) => n.id === node.parentId);
       if (!parent) return;
       const absX = parent.position.x + node.position.x;
       const absY = parent.position.y + node.position.y;
       updateEntityParent(node.id, node.type, null);
-      updateEntityPosition(node.id, node.type, absX, absY);
+      updateEntityPosition(node.id, node.type, Math.round(absX), Math.round(absY));
       setNodes((nds) =>
         nds.map((n) =>
           n.id === node.id
@@ -272,69 +280,61 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     }
   }, [nodes]);
 
-  // ── Drag stop: recalc containers + inject check ──────────────────
+  // ── Drag stop: nested-priority inject + container recalc ────────
   const onNodeDragStop = useCallback(
     (_event: any, node: Node) => {
       detachedThisDragRef.current = null;
+      spaceUsedThisDragRef.current = false;
 
       setNodes((nds) => {
         let updated = nds;
 
-        // ── Step 1: recalc ALL container sizes from children positions ──
-        for (const n of nds) {
-          if (n.type !== "module" && n.type !== "page") continue;
-          const minW = n.type === "module" ? 160 : 120;
-          const minH = 36;
-          const { w, h } = computeFluidBounds(nds, n.id, minW, minH);
-          const cw = Number(n.style?.width) || 0;
-          const ch = Number(n.style?.height) || 0;
-          if (w !== cw || h !== ch) {
-            updated = updated.map((x) =>
-              x.id === n.id ? { ...x, style: { ...x.style, width: w, height: h } } : x,
+        // ── Step 1: if floating, find best container by depth+overlap ──
+        if (!node.parentId) {
+          const nPos = node.position;
+          const nw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
+          const nh = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
+
+          // Collect containers with depth (how many module/page ancestors)
+          const containers = updated
+            .filter((n) => n.id !== node.id && (n.type === "module" || n.type === "page"))
+            .map((c) => ({ c, depth: containerDepth(c, updated) }));
+
+          // Find ALL matches (any overlap — only need ox>0 && oy>0)
+          const matches: Array<{ c: Node; depth: number; overlap: number }> = [];
+          for (const { c, depth } of containers) {
+            const cAbs = getNodeAbsPosition(c, updated);
+            const cw = Number(c.style?.width) || 160;
+            const ch = Number(c.style?.height) || 36;
+            const ox = Math.max(0, Math.min(nPos.x + nw, cAbs.x + cw) - Math.max(nPos.x, cAbs.x));
+            const oy = Math.max(0, Math.min(nPos.y + nh, cAbs.y + ch) - Math.max(nPos.y, cAbs.y));
+            if (ox > 0 && oy > 0) {
+              matches.push({ c, depth, overlap: ox * oy });
+            }
+          }
+
+          // Sort: deepest container first, then largest overlap
+          matches.sort((a, b) => b.depth - a.depth || b.overlap - a.overlap);
+
+          if (matches.length > 0) {
+            const best = matches[0].c;
+            const relX = Math.round(nPos.x - best.position.x);
+            const relY = Math.round(nPos.y - best.position.y);
+            updateEntityParent(node.id, node.type, best.id);
+            updateEntityPosition(node.id, node.type, relX, relY);
+            updated = updated.map((n) =>
+              n.id === node.id
+                ? { ...n, parentId: best.id, position: { x: relX, y: relY }, data: { ...n.data, isFloating: false } }
+                : n,
             );
           }
         }
 
-        // ── Step 2: inject check (Space released → auto-parent floating node) ──
-        if (!spaceRef.current && !node.parentId) {
-          const nPos = node.position; // absolute
-          const nw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
-          const nh = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
-          const childArea = nw * nh;
-
-          const containers = updated.filter(
-            (n) => n.id !== node.id && (n.type === "module" || n.type === "page"),
-          );
-
-          for (const container of containers) {
-            const cAbs = getNodeAbsPosition(container, updated);
-            const cw = Number(container.style?.width) || 160;
-            const ch = Number(container.style?.height) || 36;
-            const ox = Math.max(0, Math.min(nPos.x + nw, cAbs.x + cw) - Math.max(nPos.x, cAbs.x));
-            const oy = Math.max(0, Math.min(nPos.y + nh, cAbs.y + ch) - Math.max(nPos.y, cAbs.y));
-            const ratio = childArea > 0 ? (ox * oy) / childArea : 0;
-
-            if (ratio >= 0.3) {
-              const relX = nPos.x - container.position.x;
-              const relY = nPos.y - container.position.y;
-              updateEntityParent(node.id, node.type, container.id);
-              updateEntityPosition(node.id, node.type, relX, relY);
-              updated = updated.map((n) =>
-                n.id === node.id
-                  ? { ...n, parentId: container.id, position: { x: relX, y: relY } }
-                  : n,
-              );
-              break;
-            }
-          }
-        }
-
-        // ── Step 3: recalc again after inject ──
+        // ── Step 2: recalc ALL container sizes ──
         for (const n of updated) {
           if (n.type !== "module" && n.type !== "page") continue;
           const minW = n.type === "module" ? 160 : 120;
-          const minH = 36;
-          const { w, h } = computeFluidBounds(updated, n.id, minW, minH);
+          const { w, h } = computeFluidBounds(updated, n.id, minW, 36);
           const cw = Number(n.style?.width) || 0;
           const ch = Number(n.style?.height) || 0;
           if (w !== cw || h !== ch) {
@@ -347,7 +347,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         return updated;
       });
     },
-    [setNodes, updateEntityParent, updateEntityPosition, getNodeAbsPosition],
+    [setNodes, updateEntityParent, updateEntityPosition, getNodeAbsPosition, containerDepth],
   );
 
   // ── Orphan protection on delete ────────────────────────────────
