@@ -14,7 +14,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { FullProject } from "../types";
-import { projectsApi, parseApi, assetsApi } from "../api";
+import { projectsApi, parseApi, assetsApi, edgesApi } from "../api";
 import { ModuleNode, PageNode, FieldNode, ActionNode, setOnLabelSave } from "../components/canvas/Nodes";
 
 const nodeTypes = {
@@ -70,6 +70,16 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+
+  // ── Context menu state ──────────────────────────────────────────
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number; y: number; nodeId?: string; nodeType?: string;
+  } | null>(null);
+
+  // ── Edge editing state ──────────────────────────────────────────
+  const [editEdge, setEditEdge] = useState<FlowEdge | null>(null);
+  const [editLabel, setEditLabel] = useState("");
+  const [editQuote, setEditQuote] = useState("");
 
   // Keep a mutable ref to latest nodes for use in event callbacks
   const nodesRef = useRef<Node[]>([]);
@@ -191,6 +201,48 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     }
     return { x, y };
   }, []);
+
+  // ── Create / Delete helpers for context menu ────────────────────
+  const menuBtn: React.CSSProperties = {
+    border: "none", background: "transparent", cursor: "pointer",
+    fontSize: 13, fontWeight: 500, color: "#1d1d1f", padding: "8px 14px",
+    borderRadius: 8, textAlign: "left" as const, width: "100%",
+  };
+  const editInput: React.CSSProperties = {
+    padding: "8px 10px", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8,
+    fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" as const,
+  };
+
+  const deleteNodeById = useCallback((nodeId: string) => {
+    const n = nodesRef.current.find((x) => x.id === nodeId);
+    if (!n) return;
+    if (n.type === "module") assetsApi.deleteModule(projectId, nodeId).catch(console.warn);
+    if (n.type === "page") assetsApi.deletePage(projectId, nodeId).catch(console.warn);
+    if (n.type === "field") assetsApi.deleteField(projectId, nodeId).catch(console.warn);
+    if (n.type === "action") assetsApi.deleteAction(projectId, nodeId).catch(console.warn);
+    setNodes((nds) => nds.filter((x) => x.id !== nodeId));
+  }, [setNodes, projectId]);
+
+  const createNewNode = useCallback((type: string) => {
+    const ts = Date.now();
+    const id = `new-${type}-${ts}`;
+    const label = type === "module" ? "新模块" : type === "page" ? "新页面" : type === "field" ? "新字段" : "新操作";
+    const node: Node = {
+      id, type, position: { x: 200 + Math.random() * 300, y: 100 + Math.random() * 200 },
+      data: { label },
+      style: nodeDefaultSize(type, label),
+    };
+    const map: Record<string, string> = { module: "module", page: "page", field: "field", action: "action" };
+    const entityType = map[type] || type;
+    const apis: Record<string, CallableFunction> = {
+      module: (d: any) => assetsApi.createModule(projectId, d),
+      page: (d: any) => assetsApi.createPage(projectId, d),
+      field: (d: any) => assetsApi.createField(projectId, d),
+      action: (d: any) => assetsApi.createAction(projectId, d),
+    };
+    apis[type]?.({ name: label, posX: node.position.x, posY: node.position.y }).catch(console.warn);
+    setNodes((nds) => [...nds, node]);
+  }, [setNodes, projectId]);
 
   // ── Drag: sync position + fluid bounds (normal) OR detach (Space+drag) ──
   const onNodeDrag = useCallback(
@@ -864,6 +916,9 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
           onNodesDelete={onNodesDelete}
+          onNodeContextMenu={(_e, n) => { _e.preventDefault(); setCtxMenu({ x: _e.clientX, y: _e.clientY, nodeId: n.id, nodeType: n.type }); }}
+          onPaneContextMenu={(_e) => { _e.preventDefault(); setCtxMenu({ x: _e.clientX, y: _e.clientY }); }}
+          onEdgeDoubleClick={(_e, edge) => { setEditEdge(edge); setEditLabel(edge.label || ""); setEditQuote(edge.data?.sourceQuote || ""); }}
           nodeTypes={nodeTypes}
           defaultEdgeOptions={{
             type: "smoothstep",
@@ -902,6 +957,47 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
             zoomable
           />
         </ReactFlow>
+
+        {/* Context menu */}
+        {ctxMenu && (
+          <>
+            <div style={{ position: "fixed", inset: 0, zIndex: 998 }} onClick={() => setCtxMenu(null)} />
+            <div className="glass" style={{ position: "fixed", left: ctxMenu.x, top: ctxMenu.y, zIndex: 999, padding: 6, minWidth: 150, borderRadius: 10, display: "flex", flexDirection: "column", gap: 2 }}>
+              {ctxMenu.nodeId ? (
+                <>
+                  <button className="glass" style={menuBtn} onClick={() => { deleteNodeById(ctxMenu.nodeId!); setCtxMenu(null); }}>🗑 删除此节点</button>
+                </>
+              ) : (
+                <>
+                  <button className="glass" style={menuBtn} onClick={() => { createNewNode("module"); setCtxMenu(null); }}>📦 新建模块</button>
+                  <button className="glass" style={menuBtn} onClick={() => { createNewNode("page"); setCtxMenu(null); }}>📄 新建页面</button>
+                  <button className="glass" style={menuBtn} onClick={() => { createNewNode("field"); setCtxMenu(null); }}>🏷 新建字段</button>
+                  <button className="glass" style={menuBtn} onClick={() => { createNewNode("action"); setCtxMenu(null); }}>▶ 新建操作</button>
+                </>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Edge edit dialog */}
+        {editEdge && (
+          <>
+            <div style={{ position: "fixed", inset: 0, zIndex: 998, background: "rgba(0,0,0,0.2)", backdropFilter: "blur(4px)" }} onClick={() => setEditEdge(null)} />
+            <div className="glass" style={{ position: "fixed", top: "40%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 999, padding: 20, borderRadius: 12, minWidth: 280, display: "flex", flexDirection: "column", gap: 10 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#1d1d1f" }}>编辑连线</span>
+              <input placeholder="标签（如：点击后进入）" value={editLabel} onChange={(e) => setEditLabel(e.target.value)} style={editInput} />
+              <input placeholder="原文引用（sourceQuote）" value={editQuote} onChange={(e) => setEditQuote(e.target.value)} style={editInput} />
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button className="glass" style={{ ...menuBtn, color: "#86868b" }} onClick={() => setEditEdge(null)}>取消</button>
+                <button className="glass" style={{ ...menuBtn, background: "#0071e3", color: "#fff" }} onClick={() => {
+                  edgesApi.update(projectId, editEdge.id, { label: editLabel, sourceQuote: editQuote }).catch(() => {});
+                  setEdges((eds) => eds.map((e) => e.id === editEdge.id ? { ...e, label: editLabel, data: { ...(e.data || {}), sourceQuote: editQuote } } : e));
+                  setEditEdge(null);
+                }}>保存</button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Bottom input bar */}
