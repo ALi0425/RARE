@@ -174,34 +174,16 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     return changed ? updated : nds;
   }
 
-  // ── onNodesChange wrapper: apply changes + recalc containers in ONE setNodes call ──
+  // ── onNodesChange wrapper: let useNodesState apply changes, then recalc containers ──
   const handleNodesChange = useCallback(
     (changes: any[]) => {
-      setNodes((prev) => {
-        // Step 1: apply all changes to get latest positions
-        let updated = [...prev];
-        for (const ch of changes) {
-          if (ch.type === "position") {
-            const i = updated.findIndex((n) => n.id === ch.id);
-            if (i !== -1) updated[i] = { ...updated[i], position: ch.position || updated[i].position };
-          } else if (ch.type === "dimensions") {
-            // pass — dimensions are read-only in React Flow
-          } else if (ch.type === "remove") {
-            updated = updated.filter((n) => n.id !== ch.id);
-          } else if (ch.type === "select") {
-            const i = updated.findIndex((n) => n.id === ch.id);
-            if (i !== -1) updated[i] = { ...updated[i], selected: ch.selected };
-          } else if (ch.type === "add") {
-            updated.push(ch.item);
-          } else if (ch.type === "replace") {
-            updated = updated.map((n) => (n.id === ch.id ? ch.item : n));
-          }
-        }
-        // Step 2: recalc container sizes on the same (fresh) array
-        return recalcContainers(updated);
-      });
+      onNodesChange(changes);
+      const hasPos = changes.some((c: any) => c.type === "position");
+      if (hasPos) {
+        setNodes((prev) => recalcContainers(prev));
+      }
     },
-    [setNodes],
+    [onNodesChange, setNodes],
   );
 
   // ── API helpers ──────────────────────────────────────────────────
