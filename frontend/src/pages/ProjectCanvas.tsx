@@ -127,7 +127,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
   }, [setNodes]);
 
   // ── Pure function: update container sizes from children positions ──
-  function recalcContainers(nds: Node[]): Node[] {
+  const recalcContainers = useCallback((nds: Node[]): Node[] => {
     let changed = false;
     const updated = nds.map((n) => {
       if (n.type !== "module" && n.type !== "page") return n;
@@ -140,19 +140,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
       return { ...n, style: { ...(n.style || {}), width: w, height: h } };
     });
     return changed ? updated : nds;
-  }
-
-  // ── onNodesChange wrapper: let useNodesState apply changes, then recalc containers ──
-  const handleNodesChange = useCallback(
-    (changes: any[]) => {
-      onNodesChange(changes);
-      const hasPos = changes.some((c: any) => c.type === "position");
-      if (hasPos) {
-        setNodes((prev) => recalcContainers(prev));
-      }
-    },
-    [onNodesChange, setNodes],
-  );
+  }, []);
 
   // ── API helpers ──────────────────────────────────────────────────
   const updateEntityParent = useCallback(
@@ -204,26 +192,33 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     return { x, y };
   }, []);
 
-  // ── Space+drag: detach child from parent immediately (Space signals intent) ──
+  // ── Drag: sync position + fluid bounds (normal) OR detach (Space+drag) ──
   const onNodeDrag = useCallback(
     (_event: any, node: Node) => {
-      if (!spaceRef.current || !node.parentId) return;
-
       setNodes((nds) => {
-        const parent = nds.find((n) => n.id === node.parentId);
-        if (!parent) return nds;
-
-        const absX = parent.position.x + node.position.x;
-        const absY = parent.position.y + node.position.y;
-
-        updateEntityParent(node.id, node.type, null);
-        updateEntityPosition(node.id, node.type, absX, absY);
-
-        return nds.map((n) =>
-          n.id === node.id
-            ? { ...n, parentId: undefined, position: { x: absX, y: absY }, data: { ...n.data, isFloating: true } }
-            : n,
+        // Step 1: sync the dragged node's live position from the event
+        let updated = nds.map((n) =>
+          n.id === node.id ? { ...n, position: node.position } : n,
         );
+
+        // Step 2: Space+drag = detach from parent
+        if (spaceRef.current && node.parentId) {
+          const parent = nds.find((n) => n.id === node.parentId);
+          if (parent) {
+            const absX = parent.position.x + node.position.x;
+            const absY = parent.position.y + node.position.y;
+            updateEntityParent(node.id, node.type, null);
+            updateEntityPosition(node.id, node.type, absX, absY);
+            updated = updated.map((n) =>
+              n.id === node.id
+                ? { ...n, parentId: undefined, position: { x: absX, y: absY }, data: { ...n.data, isFloating: true } }
+                : n,
+            );
+          }
+        }
+
+        // Step 3: recalc container sizes from latest positions
+        return recalcContainers(updated);
       });
     },
     [setNodes, updateEntityParent, updateEntityPosition],
@@ -863,7 +858,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={handleNodesChange}
+          onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeDrag={onNodeDrag}
