@@ -136,32 +136,8 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     });
   }, [setNodes]);
 
-  // ── Pure function: update container sizes from children positions ──
-  const recalcContainers = useCallback((nds: Node[]): Node[] => {
-    let changed = false;
-    const updated = nds.map((n) => {
-      if (n.type !== "module" && n.type !== "page") return n;
-      const minW = n.type === "module" ? 160 : 120;
-      const { w, h } = computeFluidBounds(nds, n.id, minW, 36);
-      const prev = prevSizesRef.current.get(n.id);
-      if (prev && prev.w === w && prev.h === h) return n;
-      changed = true;
-      prevSizesRef.current.set(n.id, { w, h } as any);
-      return { ...n, style: { ...(n.style || {}), width: w, height: h } };
-    });
-    return changed ? updated : nds;
-  }, []);
-
-  // ── onNodesChange wrapper: recalc containers on every position change ──
-  const handleNodesChange = useCallback(
-    (changes: any[]) => {
-      onNodesChange(changes);
-      if (changes.some((c: any) => c.type === "position")) {
-        setNodes((prev) => recalcContainers(prev));
-      }
-    },
-    [onNodesChange, setNodes],
-  );
+  // ── Drag: detach on Space+drag (once per drag, ref-guarded) ──
+  const detachedThisDragRef = useRef<string | null>(null);
 
   // ── API helpers ──────────────────────────────────────────────────
   const updateEntityParent = useCallback(
@@ -255,23 +231,28 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     setNodes((nds) => [...nds, node]);
   }, [setNodes, projectId]);
 
-  // ── Drag: sync position + fluid bounds (normal) OR detach (Space+drag) ──
+  // ── Drag: detach on Space+drag (once per drag, ref-guarded) ──
+
   const onNodeDrag = useCallback(
     (_event: any, node: Node) => {
       if (!spaceRef.current || !node.parentId) return;
-      setNodes((nds) => {
-        const parent = nds.find((n) => n.id === node.parentId);
-        if (!parent) return nds;
-        const absX = parent.position.x + node.position.x;
-        const absY = parent.position.y + node.position.y;
-        updateEntityParent(node.id, node.type, null);
-        updateEntityPosition(node.id, node.type, absX, absY);
-        return nds.map((n) =>
+      // Guard: only detach once per drag session
+      if (detachedThisDragRef.current === node.id) return;
+      detachedThisDragRef.current = node.id;
+
+      const parent = nodesRef.current.find((n) => n.id === node.parentId);
+      if (!parent) return;
+      const absX = parent.position.x + node.position.x;
+      const absY = parent.position.y + node.position.y;
+      updateEntityParent(node.id, node.type, null);
+      updateEntityPosition(node.id, node.type, absX, absY);
+      setNodes((nds) =>
+        nds.map((n) =>
           n.id === node.id
             ? { ...n, parentId: undefined, position: { x: absX, y: absY }, data: { ...n.data, isFloating: true } }
             : n,
-        );
-      });
+        ),
+      );
     },
     [setNodes, updateEntityParent, updateEntityPosition],
   );
@@ -291,69 +272,82 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     }
   }, [nodes]);
 
-  // ── Inject on drop: reparent if child overlaps a container by ≥30% ──
+  // ── Drag stop: recalc containers + inject check ──────────────────
   const onNodeDragStop = useCallback(
     (_event: any, node: Node) => {
-      // Space held → keep floating; already inside container → stay
-      if (spaceRef.current || node.parentId) {
-        recalcFluidBounds();
-        return;
-      }
+      detachedThisDragRef.current = null;
 
       setNodes((nds) => {
-        const absX = node.position.x;
-        const absY = node.position.y;
-        const nw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
-        const nh = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
-        const childArea = nw * nh;
+        let updated = nds;
 
-        const containers = nds.filter((n) => n.id !== node.id && (n.type === "module" || n.type === "page"));
-
-        for (const container of containers) {
-          const cPos = getNodeAbsPosition(container, nds);
-          const cw = Number(container.style?.width) || 160;
-          const ch = Number(container.style?.height) || 36;
-
-          // Overlap: fraction of child area inside container
-          const ox = Math.max(0, Math.min(absX + nw, cPos.x + cw) - Math.max(absX, cPos.x));
-          const oy = Math.max(0, Math.min(absY + nh, cPos.y + ch) - Math.max(absY, cPos.y));
-          const overlap = ox * oy;
-          const ratio = childArea > 0 ? overlap / childArea : 0;
-
-          if (ratio >= 0.3) {
-            const relX = absX - container.position.x;
-            const relY = absY - container.position.y;
-
-            updateEntityParent(node.id, node.type, container.id);
-            updateEntityPosition(node.id, node.type, relX, relY);
-
-            // Inject child and resize container to accommodate it
-            const minW = container.type === "module" ? 160 : 120;
-            const minH = 36;
-
-            // Temporarily attach child to compute new parent bounds
-            const withChild = nds.map((n) =>
-              n.id === node.id
-                ? { ...n, parentId: container.id, extent: "parent" as const, position: { x: relX, y: relY }, data: { ...n.data, isFloating: false } }
-                : n,
-            );
-            const { w, h } = computeFluidBounds(withChild, container.id, minW, minH);
-            prevSizesRef.current.set(container.id, { w, h } as any);
-
-            return withChild.map((n) =>
-              n.id === container.id
-                ? { ...n, style: { ...n.style, width: w, height: h } }
-                : n,
+        // ── Step 1: recalc ALL container sizes from children positions ──
+        for (const n of nds) {
+          if (n.type !== "module" && n.type !== "page") continue;
+          const minW = n.type === "module" ? 160 : 120;
+          const minH = 36;
+          const { w, h } = computeFluidBounds(nds, n.id, minW, minH);
+          const cw = Number(n.style?.width) || 0;
+          const ch = Number(n.style?.height) || 0;
+          if (w !== cw || h !== ch) {
+            updated = updated.map((x) =>
+              x.id === n.id ? { ...x, style: { ...x.style, width: w, height: h } } : x,
             );
           }
         }
 
-        return nds;
+        // ── Step 2: inject check (Space released → auto-parent floating node) ──
+        if (!spaceRef.current && !node.parentId) {
+          const nPos = node.position; // absolute
+          const nw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
+          const nh = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
+          const childArea = nw * nh;
+
+          const containers = updated.filter(
+            (n) => n.id !== node.id && (n.type === "module" || n.type === "page"),
+          );
+
+          for (const container of containers) {
+            const cAbs = getNodeAbsPosition(container, updated);
+            const cw = Number(container.style?.width) || 160;
+            const ch = Number(container.style?.height) || 36;
+            const ox = Math.max(0, Math.min(nPos.x + nw, cAbs.x + cw) - Math.max(nPos.x, cAbs.x));
+            const oy = Math.max(0, Math.min(nPos.y + nh, cAbs.y + ch) - Math.max(nPos.y, cAbs.y));
+            const ratio = childArea > 0 ? (ox * oy) / childArea : 0;
+
+            if (ratio >= 0.3) {
+              const relX = nPos.x - container.position.x;
+              const relY = nPos.y - container.position.y;
+              updateEntityParent(node.id, node.type, container.id);
+              updateEntityPosition(node.id, node.type, relX, relY);
+              updated = updated.map((n) =>
+                n.id === node.id
+                  ? { ...n, parentId: container.id, position: { x: relX, y: relY } }
+                  : n,
+              );
+              break;
+            }
+          }
+        }
+
+        // ── Step 3: recalc again after inject ──
+        for (const n of updated) {
+          if (n.type !== "module" && n.type !== "page") continue;
+          const minW = n.type === "module" ? 160 : 120;
+          const minH = 36;
+          const { w, h } = computeFluidBounds(updated, n.id, minW, minH);
+          const cw = Number(n.style?.width) || 0;
+          const ch = Number(n.style?.height) || 0;
+          if (w !== cw || h !== ch) {
+            updated = updated.map((x) =>
+              x.id === n.id ? { ...x, style: { ...x.style, width: w, height: h } } : x,
+            );
+          }
+        }
+
+        return updated;
       });
-      // Always recheck container sizes after drag stop
-      requestAnimationFrame(() => recalcFluidBounds());
     },
-    [setNodes, updateEntityParent, updateEntityPosition, getNodeAbsPosition, recalcFluidBounds],
+    [setNodes, updateEntityParent, updateEntityPosition, getNodeAbsPosition],
   );
 
   // ── Orphan protection on delete ────────────────────────────────
@@ -579,7 +573,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: p.name },
         parentId: p.moduleId || undefined,
-        extent: p.moduleId ? ("parent" as const) : undefined,
         style: { width: ps.w, height: ps.h, overflow: "visible", transition: "none" },
       });
     }
@@ -596,7 +589,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: f.name, fieldType: f.fieldType },
         parentId: f.pageId || undefined,
-        extent: f.pageId ? ("parent" as const) : undefined,
         style: { width: w, height: h },
       });
     }
@@ -613,7 +605,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: a.name, actionType: a.actionType, validations: a.validations },
         parentId: a.pageId || undefined,
-        extent: a.pageId ? ("parent" as const) : undefined,
         style: { width: w, height: h },
       });
     }
@@ -910,7 +901,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={handleNodesChange}
+          onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeDrag={onNodeDrag}
