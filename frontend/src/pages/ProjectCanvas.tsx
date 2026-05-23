@@ -46,27 +46,17 @@ function nodeDefaultSize(type?: string, label = "", hasExtra = false): { w: numb
 
 function computeFluidBounds(nodes: Node[], containerId: string, minW = 160, minH = 36) {
   const children = nodes.filter((n) => n.parentId === containerId);
-  if (children.length === 0) return { x: 0, y: 0, w: minW, h: minH };
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  if (children.length === 0) return { w: minW, h: minH };
+  let maxX = 0, maxY = 0;
   for (const c of children) {
     const cw = Number(c.style?.width) || nodeDefaultSize(c.type, c.data?.label).w;
     const ch = Number(c.style?.height) || nodeDefaultSize(c.type, c.data?.label).h;
-    if (c.position.x < minX) minX = c.position.x;
-    if (c.position.y < minY) minY = c.position.y;
     const rx = c.position.x + cw;
     const by = c.position.y + ch;
     if (rx > maxX) maxX = rx;
     if (by > maxY) maxY = by;
   }
-  // If children shifted up/left, parent needs to expand in that direction
-  const offsetX = Math.max(0, minX < 0 ? -minX + 20 : 0);
-  const offsetY = Math.max(0, minY < 0 ? -minY + 20 : 0);
-  return {
-    x: offsetX,
-    y: offsetY,
-    w: Math.max(maxX + 40 + offsetX, minW),
-    h: Math.max(maxY + 40 + offsetY, minH),
-  };
+  return { w: Math.max(maxX + 40, minW), h: Math.max(maxY + 40, minH) };
 }
 
 export default function ProjectCanvas({ projectId, onBack }: Props) {
@@ -109,7 +99,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
   }, []);
 
   // ── Fluid bounds auto-resize containers ────────────────────────
-  const prevSizesRef = useRef<Map<string, { w: number; h: number; ox: number; oy: number }>>(new Map());
+  const prevSizesRef = useRef<Map<string, { w: number; h: number }>>(new Map());
 
   const recalcFluidBounds = useCallback(() => {
     setNodes((nds) => {
@@ -136,40 +126,18 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     });
   }, [setNodes]);
 
-  // ── Pure function: recalc container sizes from an array of nodes ──
+  // ── Pure function: update container sizes from children positions ──
   function recalcContainers(nds: Node[]): Node[] {
-    // Collect all container bounds first (including offsets)
-    const containerBounds = new Map<string, { ox: number; oy: number; w: number; h: number }>();
-    for (const n of nds) {
-      if (n.type !== "module" && n.type !== "page") continue;
-      const minW = n.type === "module" ? 160 : 120;
-      const { x: ox, y: oy, w, h } = computeFluidBounds(nds, n.id, minW, 36);
-      containerBounds.set(n.id, { ox, oy, w, h });
-    }
-
     let changed = false;
     const updated = nds.map((n) => {
-      const bounds = containerBounds.get(n.id);
-      if (!bounds) {
-        // If this node is a child of a shifted parent, shift it too
-        if (n.parentId) {
-          const pb = containerBounds.get(n.parentId);
-          if (pb && (pb.ox > 0 || pb.oy > 0)) {
-            changed = true;
-            return { ...n, position: { x: n.position.x + pb.ox, y: n.position.y + pb.oy } };
-          }
-        }
-        return n;
-      }
+      if (n.type !== "module" && n.type !== "page") return n;
+      const minW = n.type === "module" ? 160 : 120;
+      const { w, h } = computeFluidBounds(nds, n.id, minW, 36);
       const prev = prevSizesRef.current.get(n.id);
-      if (prev && prev.w === bounds.w && prev.h === bounds.h && prev.ox === bounds.ox && prev.oy === bounds.oy) return n;
+      if (prev && prev.w === w && prev.h === h) return n;
       changed = true;
-      prevSizesRef.current.set(n.id, { w: bounds.w, h: bounds.h, ox: bounds.ox, oy: bounds.oy } as any);
-      return {
-        ...n,
-        position: { x: n.position.x - bounds.ox, y: n.position.y - bounds.oy },
-        style: { ...(n.style || {}), width: bounds.w, height: bounds.h },
-      };
+      prevSizesRef.current.set(n.id, { w, h } as any);
+      return { ...n, style: { ...(n.style || {}), width: w, height: h } };
     });
     return changed ? updated : nds;
   }
@@ -322,15 +290,13 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
                 ? { ...n, parentId: container.id, position: { x: relX, y: relY }, data: { ...n.data, isFloating: false } }
                 : n,
             );
-            const { x: ox, y: oy, w, h } = computeFluidBounds(withChild, container.id, minW, minH);
-            prevSizesRef.current.set(container.id, { w, h, ox, oy } as any);
+            const { w, h } = computeFluidBounds(withChild, container.id, minW, minH);
+            prevSizesRef.current.set(container.id, { w, h } as any);
 
             return withChild.map((n) =>
               n.id === container.id
-                ? { ...n, position: { x: n.position.x - ox, y: n.position.y - oy }, style: { ...n.style, width: w, height: h } }
-                : n.id === node.id
-                  ? { ...n, position: { x: n.position.x + ox, y: n.position.y + oy } }
-                  : n,
+                ? { ...n, style: { ...n.style, width: w, height: h } }
+                : n,
             );
           }
         }
