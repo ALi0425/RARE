@@ -268,7 +268,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         return;
       }
 
-      // ── Normal drag: throttled container expansion ──
+      // ── Normal drag: throttled fluid bounds (expand + shrink) ──
       if (!node.parentId) return;
       const now = Date.now();
       if (now - lastExpandRef.current < 150) return;
@@ -276,19 +276,20 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
       const parent = nodesRef.current.find((n) => n.id === node.parentId);
       if (!parent || (parent.type !== "module" && parent.type !== "page")) return;
 
-      const cw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
-      const ch = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
-      const childR = node.position.x + cw;
-      const childB = node.position.y + ch;
-      const pW = Number(parent.style?.width) || (parent.type === "module" ? 160 : 120);
-      const pH = Number(parent.style?.height) || 36;
-
-      if (childR + 20 > pW || childB + 20 > pH) {
-        lastExpandRef.current = now;
+      lastExpandRef.current = now;
+      const { w, h } = computeFluidBounds(
+        nodesRef.current,
+        parent.id,
+        parent.type === "module" ? 160 : 120,
+        36,
+      );
+      const pW = Number(parent.style?.width) || 0;
+      const pH = Number(parent.style?.height) || 0;
+      if (w !== pW || h !== pH) {
         setNodes((nds) =>
           nds.map((n) =>
             n.id === parent.id
-              ? { ...n, style: { ...n.style, width: Math.max(pW, childR + 40), height: Math.max(pH, childB + 40) } }
+              ? { ...n, style: { ...n.style, width: w, height: h } }
               : n,
           ),
         );
@@ -312,24 +313,43 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     }
   }, [nodes]);
 
-  // ── Drag stop: nested-priority inject + container recalc ────────
+  // ── Drag stop: Space detach → inject → recalc ────────────────
   const onNodeDragStop = useCallback(
     (_event: any, node: Node) => {
+      const wasSpace = spaceUsedThisDragRef.current;
       detachedThisDragRef.current = null;
       spaceUsedThisDragRef.current = false;
 
       setNodes((nds) => {
         let updated = nds;
 
+        // ── Step 0: Space detach (convert relative→absolute, clear parentId) ──
+        if (wasSpace && node.parentId) {
+          const parent = nds.find((n) => n.id === node.parentId);
+          if (parent) {
+            const absX = parent.position.x + node.position.x;
+            const absY = parent.position.y + node.position.y;
+            updateEntityParent(node.id, node.type, null);
+            updateEntityPosition(node.id, node.type, Math.round(absX), Math.round(absY));
+            updated = updated.map((n) =>
+              n.id === node.id
+                ? { ...n, parentId: undefined, extent: undefined, position: { x: absX, y: absY }, data: { ...n.data, isFloating: true } }
+                : n,
+            );
+          }
+        }
+
         // ── Step 1: if floating, find best container by depth+overlap ──
-        if (!node.parentId) {
-          const nPos = node.position;
-          const nw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
-          const nh = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
+        // (re-read node state from updated in case we just detached)
+        const currentNode = updated.find((n) => n.id === node.id) || node;
+        if (!currentNode.parentId) {
+          const nPos = currentNode.position;
+          const nw = Number(currentNode.style?.width) || nodeDefaultSize(currentNode.type, currentNode.data?.label).w;
+          const nh = Number(currentNode.style?.height) || nodeDefaultSize(currentNode.type, currentNode.data?.label).h;
 
           // Collect containers with depth (how many module/page ancestors)
           const containers = updated
-            .filter((n) => n.id !== node.id && (n.type === "module" || n.type === "page"))
+            .filter((n) => n.id !== currentNode.id && (n.type === "module" || n.type === "page"))
             .map((c) => ({ c, depth: containerDepth(c, updated) }));
 
           // Find ALL matches (any overlap — only need ox>0 && oy>0)
@@ -352,10 +372,10 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
             const best = matches[0].c;
             const relX = Math.round(nPos.x - best.position.x);
             const relY = Math.round(nPos.y - best.position.y);
-            updateEntityParent(node.id, node.type, best.id);
-            updateEntityPosition(node.id, node.type, relX, relY);
+            updateEntityParent(currentNode.id, currentNode.type, best.id);
+            updateEntityPosition(currentNode.id, currentNode.type, relX, relY);
             updated = updated.map((n) =>
-              n.id === node.id
+              n.id === currentNode.id
                 ? { ...n, parentId: best.id, position: { x: relX, y: relY }, data: { ...n.data, isFloating: false } }
                 : n,
             );
@@ -605,7 +625,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: p.name },
         parentId: p.moduleId || undefined,
-        extent: p.moduleId ? ("parent" as const) : undefined,
         style: { width: ps.w, height: ps.h, overflow: "visible", transition: "width 0.15s ease, height 0.15s ease" },
       });
     }
@@ -622,7 +641,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: f.name, fieldType: f.fieldType },
         parentId: f.pageId || undefined,
-        extent: f.pageId ? ("parent" as const) : undefined,
         style: { width: w, height: h },
       });
     }
@@ -639,7 +657,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: a.name, actionType: a.actionType, validations: a.validations },
         parentId: a.pageId || undefined,
-        extent: a.pageId ? ("parent" as const) : undefined,
         style: { width: w, height: h },
       });
     }
