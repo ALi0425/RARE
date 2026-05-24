@@ -246,29 +246,16 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
 
   const onNodeDrag = useCallback(
     (_event: any, node: Node) => {
-      // ── Space+drag = detach ──
+      // ── Space+drag: track intent, don't update containers ──
       if (spaceRef.current) {
-        if (!node.parentId) return;
-        if (detachedThisDragRef.current === node.id) return;
-        detachedThisDragRef.current = node.id;
-        spaceUsedThisDragRef.current = true;
-        const parent = nodesRef.current.find((n) => n.id === node.parentId);
-        if (!parent) return;
-        const absX = parent.position.x + node.position.x;
-        const absY = parent.position.y + node.position.y;
-        updateEntityParent(node.id, node.type, null);
-        updateEntityPosition(node.id, node.type, Math.round(absX), Math.round(absY));
-        setNodes((nds) =>
-          nds.map((n) =>
-            n.id === node.id
-              ? { ...n, parentId: undefined, position: { x: absX, y: absY }, data: { ...n.data, isFloating: true } }
-              : n,
-          ),
-        );
-        return;
+        if (node.parentId && !detachedThisDragRef.current) {
+          detachedThisDragRef.current = node.id;
+          spaceUsedThisDragRef.current = true;
+        }
+        return; // node moves freely (no extent), detach handled on stop
       }
 
-      // ── Normal drag: throttled fluid bounds (expand + shrink) ──
+      // ── Normal drag: throttled fluid bounds with LIVE drag position ──
       if (!node.parentId) return;
       const now = Date.now();
       if (now - lastExpandRef.current < 150) return;
@@ -277,12 +264,25 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
       if (!parent || (parent.type !== "module" && parent.type !== "page")) return;
 
       lastExpandRef.current = now;
-      const { w, h } = computeFluidBounds(
-        nodesRef.current,
-        parent.id,
-        parent.type === "module" ? 160 : 120,
-        36,
+
+      // Compute live fluid bounds: dragged node uses real position from callback,
+      // other children use stored positions (they aren't moving)
+      const siblings = nodesRef.current.filter(
+        (n) => n.parentId === parent.id && n.id !== node.id,
       );
+      const dcw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
+      const dch = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
+      let maxX = node.position.x + dcw;
+      let maxY = node.position.y + dch;
+      for (const s of siblings) {
+        const scw = Number(s.style?.width) || nodeDefaultSize(s.type, s.data?.label).w;
+        const sch = Number(s.style?.height) || nodeDefaultSize(s.type, s.data?.label).h;
+        maxX = Math.max(maxX, s.position.x + scw);
+        maxY = Math.max(maxY, s.position.y + sch);
+      }
+      const minW = parent.type === "module" ? 160 : 120;
+      const w = Math.max(maxX + 40, minW);
+      const h = Math.max(maxY + 40, 36);
       const pW = Number(parent.style?.width) || 0;
       const pH = Number(parent.style?.height) || 0;
       if (w !== pW || h !== pH) {
@@ -295,7 +295,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         );
       }
     },
-    [setNodes, updateEntityParent, updateEntityPosition],
+    [setNodes],
   );
 
   // ── Container visual pulse when bounds change ──────────────────
