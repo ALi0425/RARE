@@ -51,7 +51,9 @@ router.post("/:projectId/pages", async (req, res) => {
 });
 
 router.patch("/:projectId/pages/:id", async (req, res) => {
-  const { name, moduleId, posX, posY } = req.body;
+  const { name, moduleId: rawModuleId, posX, posY } = req.body;
+  // Coerce empty string / undefined → null for nullable FK
+  const moduleId = rawModuleId === "" || rawModuleId === undefined ? null : rawModuleId;
   const p = await prisma.page.update({
     where: { id: req.params.id as string },
     data: { ...(name && { name }), ...(moduleId !== undefined && { moduleId }), ...(posX !== undefined && { posX }), ...(posY !== undefined && { posY }) },
@@ -82,7 +84,8 @@ router.post("/:projectId/fields", async (req, res) => {
 });
 
 router.patch("/:projectId/fields/:id", async (req, res) => {
-  const { name, fieldType, pageId, posX, posY } = req.body;
+  const { name, fieldType, pageId: rawPageId, posX, posY } = req.body;
+  const pageId = rawPageId === "" || rawPageId === undefined ? null : rawPageId;
   const f = await prisma.field.update({
     where: { id: req.params.id as string },
     data: { ...(name && { name }), ...(fieldType && { fieldType }), ...(pageId !== undefined && { pageId }), ...(posX !== undefined && { posX }), ...(posY !== undefined && { posY }) },
@@ -110,7 +113,8 @@ router.post("/:projectId/actions", async (req, res) => {
 });
 
 router.patch("/:projectId/actions/:id", async (req, res) => {
-  const { name, actionType, pageId, validations, posX, posY } = req.body;
+  const { name, actionType, pageId: rawPageId, validations, posX, posY } = req.body;
+  const pageId = rawPageId === "" || rawPageId === undefined ? null : rawPageId;
   const a = await prisma.action.update({
     where: { id: req.params.id as string },
     data: { ...(name && { name }), ...(actionType && { actionType }), ...(pageId !== undefined && { pageId }), ...(validations && { validations }), ...(posX !== undefined && { posX }), ...(posY !== undefined && { posY }) },

@@ -229,14 +229,19 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
       const wasSpace = spaceUsedThisDragRef.current;
       spaceUsedThisDragRef.current = false;
 
+      // Collect API side-effects to run AFTER setNodes (keep setNodes pure)
+      const apiCalls: Array<() => void> = [];
+
       setNodes((nds) => {
         let updated = nds;
 
         // Step 0: Space detach — full parent chain → absolute coords
         if (wasSpace && node.parentId) {
           const abs = getNodeAbsPosition(node, nds);
-          updateEntityParent(node.id, node.type, null);
-          updateEntityPosition(node.id, node.type, Math.round(abs.x), Math.round(abs.y));
+          apiCalls.push(() => {
+            updateEntityParent(node.id, node.type, null);
+            updateEntityPosition(node.id, node.type, Math.round(abs.x), Math.round(abs.y));
+          });
           updated = updated.map((n) =>
             n.id === node.id
               ? { ...n, parentId: undefined, extent: undefined, position: { x: abs.x, y: abs.y }, data: { ...n.data, isFloating: true } }
@@ -267,8 +272,10 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
             const best = matches[0].c;
             const rx = Math.round(nPos.x - best.position.x);
             const ry = Math.round(nPos.y - best.position.y);
-            updateEntityParent(cur.id, cur.type, best.id);
-            updateEntityPosition(cur.id, cur.type, rx, ry);
+            apiCalls.push(() => {
+              updateEntityParent(cur.id, cur.type, best.id);
+              updateEntityPosition(cur.id, cur.type, rx, ry);
+            });
             updated = updated.map((n) =>
               n.id === cur.id ? { ...n, parentId: best.id, position: { x: rx, y: ry }, data: { ...n.data, isFloating: false } } : n,
             );
@@ -284,6 +291,9 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
             updated = updated.map((x) => (x.id === n.id ? { ...x, style: { ...x.style, width: w, height: h } } : x));
           }
         }
+
+        // Run API calls after state update (async, fire-and-forget)
+        setTimeout(() => apiCalls.forEach((fn) => fn()), 0);
 
         return updated;
       });
