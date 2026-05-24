@@ -323,20 +323,16 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
       setNodes((nds) => {
         let updated = nds;
 
-        // ── Step 0: Space detach (convert relative→absolute, clear parentId) ──
+        // ── Step 0: Space detach (convert relative→absolute via full parent chain) ──
         if (wasSpace && node.parentId) {
-          const parent = nds.find((n) => n.id === node.parentId);
-          if (parent) {
-            const absX = parent.position.x + node.position.x;
-            const absY = parent.position.y + node.position.y;
-            updateEntityParent(node.id, node.type, null);
-            updateEntityPosition(node.id, node.type, Math.round(absX), Math.round(absY));
-            updated = updated.map((n) =>
-              n.id === node.id
-                ? { ...n, parentId: undefined, extent: undefined, position: { x: absX, y: absY }, data: { ...n.data, isFloating: true } }
-                : n,
-            );
-          }
+          const abs = getNodeAbsPosition(node, nds);
+          updateEntityParent(node.id, node.type, null);
+          updateEntityPosition(node.id, node.type, Math.round(abs.x), Math.round(abs.y));
+          updated = updated.map((n) =>
+            n.id === node.id
+              ? { ...n, parentId: undefined, extent: undefined, position: { x: abs.x, y: abs.y }, data: { ...n.data, isFloating: true } }
+              : n,
+          );
         }
 
         // ── Step 1: if floating, find best container by depth+overlap ──
