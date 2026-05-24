@@ -8,33 +8,32 @@ datasource db {
 }
 
 model Project {
-  id          String   @id @default(uuid())
-  name        String
+  id        String   @id @default(uuid())
+  name      String
   description String?
-  status      String   @default("active") // active | archived
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  status    String   @default("active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  modules     Module[]
-  pages       Page[]
-  fields      Field[]
-  actions     Action[]
-  edges       Edge[]
-  commitLogs  CommitLog[]
-  summaries   MacroSummary[]
+  modules Module[]
+  pages   Page[]
+  fields  Field[]
+  actions Action[]
+  edges   Edge[]
+  validations Validation[]
+  commitLogs CommitLog[]
 
   @@map("projects")
 }
 
 model Module {
-  id          String   @id @default(uuid())
-  projectId   String   @map("project_id")
-  name        String
-  description String?
-  posX        Float    @default(0) @map("pos_x")
-  posY        Float    @default(0) @map("pos_y")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  name      String
+  posX      Float    @default(0) @map("pos_x")
+  posY      Float    @default(0) @map("pos_y")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   pages   Page[]
@@ -71,70 +70,76 @@ model Field {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  project Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  page    Page?    @relation(fields: [pageId], references: [id])
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  page        Page?       @relation(fields: [pageId], references: [id])
+  validations Validation[]
 
   @@map("fields")
 }
 
 model Action {
-  id         String   @id @default(uuid())
-  projectId  String   @map("project_id")
-  pageId     String?  @map("page_id")
-  name       String
-  actionType String   @default("operation") @map("action_type")
-  validations Json?   // Array of precondition strings
-  posX       Float    @default(0) @map("pos_x")
-  posY       Float    @default(0) @map("pos_y")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  pageId      String?  @map("page_id")
+  name        String
+  actionType  String   @default("operation") @map("action_type")
+  posX        Float    @default(0) @map("pos_x")
+  posY        Float    @default(0) @map("pos_y")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  page    Page?   @relation(fields: [pageId], references: [id])
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  page        Page?       @relation(fields: [pageId], references: [id])
+  validations Validation[]
 
   @@map("actions")
 }
 
 model Edge {
-  id         String   @id @default(uuid())
-  projectId  String   @map("project_id")
-  sourceId   String   @map("source_id")
-  targetId   String   @map("target_id")
-  sourceType String   @map("source_type") // module | page | field | action
-  targetType String   @map("target_type")
-  flowType   String   @default("BUSINESS_FLOW") @map("flow_type") // BUSINESS_FLOW | DATA_FLOW
-  status     String   @default("extracted") // extracted | inferred
-  label      String?
-  sourceQuote String? @map("source_quote")
-  createdAt  DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  sourceId    String   @map("source_id")
+  targetId    String   @map("target_id")
+  label       String?
+  sourceQuote String?  @map("source_quote")
+  flowType    String   @default("BUSINESS_FLOW") @map("flow_type")
+  status      String   @default("extracted")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@map("edges")
 }
 
-model CommitLog {
+model Validation {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id")
-  version     Int      @default(1)
-  description String?
-  snapshot    Json?    // Full state JSON
-  baseVersion Int?     @map("base_version")
+  fieldId     String?  @map("field_id")
+  actionId    String?  @map("action_id")
+  edgeId      String?  @map("edge_id")
+  rule        String
+  type        String   @default("pre_condition")
+  sourceQuote String?  @map("source_quote")
   createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  field   Field?  @relation(fields: [fieldId], references: [id])
+  action  Action? @relation(fields: [actionId], references: [id])
 
-  @@unique([projectId, version])
-  @@map("commit_logs")
+  @@map("validations")
 }
 
-model MacroSummary {
+model CommitLog {
   id        String   @id @default(uuid())
   projectId String   @map("project_id")
-  content   String
+  version   Int
+  message   String?
+  snapshot  Json?
   createdAt DateTime @default(now()) @map("created_at")
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  @@map("macro_summaries")
+  @@map("commit_logs")
 }

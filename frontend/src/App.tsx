@@ -1,20 +1,20 @@
 import { useState } from "react";
-import ProjectLobby from "./pages/ProjectLobby";
+import Lobby from "./pages/Lobby";
 import ProjectCanvas from "./pages/ProjectCanvas";
+import { useCanvasStore } from "./store/canvasStore";
 
-function App() {
-  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+export default function App() {
+  const [currentProject, setCurrentProject] = useState<string | null>(null);
+  const loadProject = useCanvasStore((s) => s.loadProject);
 
-  if (currentProjectId) {
-    return (
-      <ProjectCanvas
-        projectId={currentProjectId}
-        onBack={() => setCurrentProjectId(null)}
-      />
-    );
+  const handleOpenProject = async (id: string) => {
+    setCurrentProject(id);
+    await loadProject(id);
+  };
+
+  if (currentProject) {
+    return <ProjectCanvas projectId={currentProject} onBack={() => setCurrentProject(null)} />;
   }
 
-  return <ProjectLobby onSelectProject={setCurrentProjectId} />;
+  return <Lobby onOpenProject={handleOpenProject} />;
 }
-
-export default App;
