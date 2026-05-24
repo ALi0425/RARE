@@ -37,11 +37,10 @@ interface CanvasStore {
   loading: boolean;
   error: string | null;
   diffState: DiffState | null;
+  loadKey: number;
 
-  setNodes: (updater: Node[] | ((prev: Node[]) => Node[])) => void;
-  setEdges: (updater: Edge[] | ((prev: Edge[]) => Edge[])) => void;
-  onNodesChange: (changes: NodeChange[]) => void;
-  onEdgesChange: (changes: EdgeChange[]) => void;
+  syncNodes: (nodes: Node[]) => void;
+  syncEdges: (edges: Edge[]) => void;
 
   loadProject: (id: string) => Promise<void>;
   applyDiff: (diff: DiffState) => void;
@@ -216,6 +215,23 @@ export function convertProjectToFlow(
 
 // ── Create store ──
 
+function nodesEqual(a: Node[], b: Node[]) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id) return false;
+    if (a[i].position.x !== b[i].position.x || a[i].position.y !== b[i].position.y) return false;
+  }
+  return true;
+}
+
+function edgesEqual(a: Edge[], b: Edge[]) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id) return false;
+  }
+  return true;
+}
+
 export const useCanvasStore = create<CanvasStore>((set, get) => ({
   projectId: null,
   projectName: "",
@@ -224,29 +240,20 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   loading: false,
   error: null,
   diffState: null,
+  loadKey: 0,
 
-  setNodes: (updater) => {
-    set((state) => ({
-      nodes: typeof updater === "function" ? updater(state.nodes) : updater,
-    }));
+  syncNodes: (nodes) => {
+    set((state) => {
+      if (nodesEqual(state.nodes, nodes)) return {};
+      return { nodes };
+    });
   },
 
-  setEdges: (updater) => {
-    set((state) => ({
-      edges: typeof updater === "function" ? updater(state.edges) : updater,
-    }));
-  },
-
-  onNodesChange: (changes: NodeChange[]) => {
-    set((state) => ({
-      nodes: applyNodeChanges(changes, state.nodes),
-    }));
-  },
-
-  onEdgesChange: (changes: EdgeChange[]) => {
-    set((state) => ({
-      edges: applyEdgeChanges(changes, state.edges),
-    }));
+  syncEdges: (edges) => {
+    set((state) => {
+      if (edgesEqual(state.edges, edges)) return {};
+      return { edges };
+    });
   },
 
   loadProject: async (id: string) => {
@@ -254,13 +261,14 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     try {
       const data = await request<ProjectData>(`/projects/${id}`);
       const { nodes, edges } = convertProjectToFlow(data);
-      set({
+      set((state) => ({
         projectId: id,
         projectName: data.name,
         nodes,
         edges,
         loading: false,
-      });
+        loadKey: state.loadKey + 1,
+      }));
     } catch (e) {
       set({
         loading: false,
@@ -287,7 +295,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
           },
         } as Node;
       });
-      return { nodes: updated, diffState: diff };
+      return { nodes: updated, diffState: diff, loadKey: state.loadKey + 1 };
     });
   },
 
@@ -298,7 +306,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         const { boxShadow, border, ...rest } = st as Record<string, any>;
         return { ...n, data: { ...n.data, diffTooltip: undefined }, style: rest };
       });
-      return { nodes: updated, diffState: null };
+      return { nodes: updated, diffState: null, loadKey: state.loadKey + 1 };
     });
   },
 
@@ -311,5 +319,6 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       loading: false,
       error: null,
       diffState: null,
+      loadKey: 0,
     }),
 }));

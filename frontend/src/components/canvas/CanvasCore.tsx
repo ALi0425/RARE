@@ -1,11 +1,14 @@
 import { useCallback, useRef, useEffect } from "react";
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Controls,
   MiniMap,
   SelectionMode,
-  type Node,
+  useNodesState,
+  useEdgesState,
+  useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useCanvasStore } from "../../store/canvasStore";
@@ -21,20 +24,48 @@ interface Props {
   onLabelSave: (nodeId: string, label: string) => void;
 }
 
-export default function CanvasCore({
+export default function CanvasCore(props: Props) {
+  return (
+    <ReactFlowProvider>
+      <CanvasCoreInner {...props} />
+    </ReactFlowProvider>
+  );
+}
+
+function CanvasCoreInner({
   projectId,
   onContextMenu,
   onEdgeDoubleClick,
   onLabelSave,
 }: Props) {
-  const nodes = useCanvasStore((s) => s.nodes);
-  const edges = useCanvasStore((s) => s.edges);
-  const onNodesChange = useCanvasStore((s) => s.onNodesChange);
-  const onEdgesChange = useCanvasStore((s) => s.onEdgesChange);
-  const setNodes = useCanvasStore((s) => s.setNodes);
-  const setEdges = useCanvasStore((s) => s.setEdges);
+  const storeNodes = useCanvasStore((s) => s.nodes);
+  const storeEdges = useCanvasStore((s) => s.edges);
+  const loadKey = useCanvasStore((s) => s.loadKey);
+  const syncNodes = useCanvasStore((s) => s.syncNodes);
+  const syncEdges = useCanvasStore((s) => s.syncEdges);
 
-  const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const [nodes, setNodes, onNodesChange] = useNodesState(storeNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(storeEdges);
+  const reactFlowInstance = useReactFlow();
+
+  // Sync from store to ReactFlow when loadKey changes (loadProject / applyDiff)
+  useEffect(() => {
+    setNodes(storeNodes);
+    setEdges(storeEdges);
+    requestAnimationFrame(() => {
+      reactFlowInstance.fitView({ padding: 0.3, maxZoom: 1.5, duration: 200 });
+    });
+  }, [loadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync from ReactFlow internal state back to Zustand (for header, etc.)
+  useEffect(() => {
+    syncNodes(nodes);
+  }, [nodes, syncNodes]);
+
+  useEffect(() => {
+    syncEdges(edges);
+  }, [edges, syncEdges]);
+
   const { onNodeDrag, onNodeDragStop, initSpaceListeners } =
     useNodeInteractions(projectId);
   const { onConnect } = useNodeOperations(projectId);
@@ -58,7 +89,6 @@ export default function CanvasCore({
 
   return (
     <div
-      ref={reactFlowWrapper}
       style={{ width: "100%", height: "100%", position: "relative" }}
     >
       <ReactFlow
@@ -89,8 +119,6 @@ export default function CanvasCore({
           markerEnd: { type: "arrowclosed" as any, color: "#555555" },
         }}
         selectionMode={SelectionMode.Partial}
-        fitView
-        fitViewOptions={{ padding: 0.3, maxZoom: 1.5 }}
         deleteKeyCode="Delete"
         multiSelectionKeyCode="Shift"
         panOnScroll={false}
