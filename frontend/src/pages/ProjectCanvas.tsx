@@ -108,35 +108,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     };
   }, []);
 
-  // ── Fluid bounds auto-resize containers ────────────────────────
-  const prevSizesRef = useRef<Map<string, { w: number; h: number }>>(new Map());
-
-  const recalcFluidBounds = useCallback(() => {
-    setNodes((nds) => {
-      let changed = false;
-      const updated = nds.map((n) => {
-        if (n.type !== "module" && n.type !== "page") return n;
-        const minW = n.type === "module" ? 160 : 120;
-        const minH = 36;
-        const { w, h } = computeFluidBounds(nds, n.id, minW, minH);
-        const prev = prevSizesRef.current.get(n.id);
-        if (prev && prev.w === w && prev.h === h) return n;
-        changed = true;
-        prevSizesRef.current.set(n.id, { w, h });
-        return {
-          ...n,
-          style: {
-            ...(n.style || {}),
-            width: w,
-            height: h,
-          },
-        };
-      });
-      return changed ? updated : nds;
-    });
-  }, [setNodes]);
-
-  // ── Drag: detach on Space+drag (once per drag, ref-guarded) ──
+  // ── Drag system: Space+drag detach + nested priority inject ──
   const detachedThisDragRef = useRef<string | null>(null);
 
   // ── API helpers ──────────────────────────────────────────────────
@@ -241,79 +213,54 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     return (p.type === "module" || p.type === "page") ? containerDepth(p, allNodes) + 1 : 1;
   }, []);
 
-  // ── Throttle for container expansion during drag ────────────────
-  const lastExpandRef = useRef(0);
+  // ── Throttle for container resize during drag ───────────────────
+  const lastResizeRef = useRef(0);
 
   const onNodeDrag = useCallback(
     (_event: any, node: Node) => {
-      // ── Space+drag: track intent, don't update containers ──
+      // Space+drag: only track intent, don't modify state during drag
       if (spaceRef.current) {
         if (node.parentId && !detachedThisDragRef.current) {
           detachedThisDragRef.current = node.id;
           spaceUsedThisDragRef.current = true;
         }
-        return; // node moves freely (no extent), detach handled on stop
+        return;
       }
 
-      // ── Normal drag: throttled fluid bounds with LIVE drag position ──
+      // Normal drag: throttled container resize using live drag position
       if (!node.parentId) return;
       const now = Date.now();
-      if (now - lastExpandRef.current < 150) return;
+      if (now - lastResizeRef.current < 150) return;
 
       const parent = nodesRef.current.find((n) => n.id === node.parentId);
       if (!parent || (parent.type !== "module" && parent.type !== "page")) return;
+      lastResizeRef.current = now;
 
-      lastExpandRef.current = now;
-
-      // Compute live fluid bounds: dragged node uses real position from callback,
-      // other children use stored positions (they aren't moving)
-      const siblings = nodesRef.current.filter(
-        (n) => n.parentId === parent.id && n.id !== node.id,
-      );
-      const dcw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
-      const dch = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
-      let maxX = node.position.x + dcw;
-      let maxY = node.position.y + dch;
+      // Live bounds: dragged node from callback, siblings from nodesRef
+      const siblings = nodesRef.current.filter((n) => n.parentId === parent.id && n.id !== node.id);
+      const dw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
+      const dh = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
+      let maxX = node.position.x + dw;
+      let maxY = node.position.y + dh;
       for (const s of siblings) {
-        const scw = Number(s.style?.width) || nodeDefaultSize(s.type, s.data?.label).w;
-        const sch = Number(s.style?.height) || nodeDefaultSize(s.type, s.data?.label).h;
-        maxX = Math.max(maxX, s.position.x + scw);
-        maxY = Math.max(maxY, s.position.y + sch);
+        const sw = Number(s.style?.width) || nodeDefaultSize(s.type, s.data?.label).w;
+        const sh = Number(s.style?.height) || nodeDefaultSize(s.type, s.data?.label).h;
+        maxX = Math.max(maxX, s.position.x + sw);
+        maxY = Math.max(maxY, s.position.y + sh);
       }
       const minW = parent.type === "module" ? 160 : 120;
       const w = Math.max(maxX + 40, minW);
       const h = Math.max(maxY + 40, 36);
-      const pW = Number(parent.style?.width) || 0;
-      const pH = Number(parent.style?.height) || 0;
-      if (w !== pW || h !== pH) {
-        setNodes((nds) =>
-          nds.map((n) =>
-            n.id === parent.id
-              ? { ...n, style: { ...n.style, width: w, height: h } }
-              : n,
-          ),
-        );
+      const pw = Number(parent.style?.width) || 0;
+      const ph = Number(parent.style?.height) || 0;
+      if (w !== pw || h !== ph) {
+        setNodes((nds) => nds.map((n) => (n.id === parent.id ? { ...n, style: { ...n.style, width: w, height: h } } : n)));
       }
     },
     [setNodes],
   );
 
-  // ── Container visual pulse when bounds change ──────────────────
-  // Add a subtle data attribute for CSS-driven animation
-  useEffect(() => {
-    if (!nodes.length) return;
-    const containerNodes = nodes.filter(n => n.type === "module" || n.type === "page");
-    for (const cn of containerNodes) {
-      const prev = prevSizesRef.current.get(cn.id);
-      const cw = Number(cn.style?.width) || 0;
-      const ch = Number(cn.style?.height) || 0;
-      if (prev && (prev.w !== cw || prev.h !== ch)) {
-        prevSizesRef.current.set(cn.id, { w: cw, h: ch });
-      }
-    }
-  }, [nodes]);
-
-  // ── Drag stop: Space detach → inject → recalc ────────────────
+  // ── Drag stop: detach (Space) → inject (depth priority) → recalc ─
   const onNodeDragStop = useCallback(
     (_event: any, node: Node) => {
       const wasSpace = spaceUsedThisDragRef.current;
@@ -323,7 +270,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
       setNodes((nds) => {
         let updated = nds;
 
-        // ── Step 0: Space detach (convert relative→absolute via full parent chain) ──
+        // Step 0: Space detach — full parent chain → absolute coords
         if (wasSpace && node.parentId) {
           const abs = getNodeAbsPosition(node, nds);
           updateEntityParent(node.id, node.type, null);
@@ -335,60 +282,44 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
           );
         }
 
-        // ── Step 1: if floating, find best container by depth+overlap ──
-        // (re-read node state from updated in case we just detached)
-        const currentNode = updated.find((n) => n.id === node.id) || node;
-        if (!currentNode.parentId) {
-          const nPos = currentNode.position;
-          const nw = Number(currentNode.style?.width) || nodeDefaultSize(currentNode.type, currentNode.data?.label).w;
-          const nh = Number(currentNode.style?.height) || nodeDefaultSize(currentNode.type, currentNode.data?.label).h;
-
-          // Collect containers with depth (how many module/page ancestors)
+        // Step 1: if floating, find deepest overlapping container
+        const cur = updated.find((n) => n.id === node.id) || node;
+        if (!cur.parentId) {
+          const nPos = cur.position;
+          const nw = Number(cur.style?.width) || nodeDefaultSize(cur.type, cur.data?.label).w;
+          const nh = Number(cur.style?.height) || nodeDefaultSize(cur.type, cur.data?.label).h;
           const containers = updated
-            .filter((n) => n.id !== currentNode.id && (n.type === "module" || n.type === "page"))
+            .filter((n) => n.id !== cur.id && (n.type === "module" || n.type === "page"))
             .map((c) => ({ c, depth: containerDepth(c, updated) }));
-
-          // Find ALL matches (any overlap — only need ox>0 && oy>0)
           const matches: Array<{ c: Node; depth: number; overlap: number }> = [];
           for (const { c, depth } of containers) {
-            const cAbs = getNodeAbsPosition(c, updated);
+            const ca = getNodeAbsPosition(c, updated);
             const cw = Number(c.style?.width) || 160;
             const ch = Number(c.style?.height) || 36;
-            const ox = Math.max(0, Math.min(nPos.x + nw, cAbs.x + cw) - Math.max(nPos.x, cAbs.x));
-            const oy = Math.max(0, Math.min(nPos.y + nh, cAbs.y + ch) - Math.max(nPos.y, cAbs.y));
-            if (ox > 0 && oy > 0) {
-              matches.push({ c, depth, overlap: ox * oy });
-            }
+            const ox = Math.max(0, Math.min(nPos.x + nw, ca.x + cw) - Math.max(nPos.x, ca.x));
+            const oy = Math.max(0, Math.min(nPos.y + nh, ca.y + ch) - Math.max(nPos.y, ca.y));
+            if (ox > 0 && oy > 0) matches.push({ c, depth, overlap: ox * oy });
           }
-
-          // Sort: deepest container first, then largest overlap
           matches.sort((a, b) => b.depth - a.depth || b.overlap - a.overlap);
-
           if (matches.length > 0) {
             const best = matches[0].c;
-            const relX = Math.round(nPos.x - best.position.x);
-            const relY = Math.round(nPos.y - best.position.y);
-            updateEntityParent(currentNode.id, currentNode.type, best.id);
-            updateEntityPosition(currentNode.id, currentNode.type, relX, relY);
+            const rx = Math.round(nPos.x - best.position.x);
+            const ry = Math.round(nPos.y - best.position.y);
+            updateEntityParent(cur.id, cur.type, best.id);
+            updateEntityPosition(cur.id, cur.type, rx, ry);
             updated = updated.map((n) =>
-              n.id === currentNode.id
-                ? { ...n, parentId: best.id, position: { x: relX, y: relY }, data: { ...n.data, isFloating: false } }
-                : n,
+              n.id === cur.id ? { ...n, parentId: best.id, position: { x: rx, y: ry }, data: { ...n.data, isFloating: false } } : n,
             );
           }
         }
 
-        // ── Step 2: recalc ALL container sizes ──
+        // Step 2: recalc ALL container sizes from final positions
         for (const n of updated) {
           if (n.type !== "module" && n.type !== "page") continue;
           const minW = n.type === "module" ? 160 : 120;
           const { w, h } = computeFluidBounds(updated, n.id, minW, 36);
-          const cw = Number(n.style?.width) || 0;
-          const ch = Number(n.style?.height) || 0;
-          if (w !== cw || h !== ch) {
-            updated = updated.map((x) =>
-              x.id === n.id ? { ...x, style: { ...x.style, width: w, height: h } } : x,
-            );
+          if (w !== (Number(n.style?.width) || 0) || h !== (Number(n.style?.height) || 0)) {
+            updated = updated.map((x) => (x.id === n.id ? { ...x, style: { ...x.style, width: w, height: h } } : x));
           }
         }
 
@@ -434,7 +365,20 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
           updateEntityParent(orphan.id, orphan.type, null);
         }
       }
-      if (orphans.length > 0) requestAnimationFrame(() => recalcFluidBounds());
+      if (orphans.length > 0) {
+        // Recalc containers after orphaning
+        setNodes((nds) => {
+          let updated = nds;
+          for (const n of nds) {
+            if (n.type !== "module" && n.type !== "page") continue;
+            const { w, h } = computeFluidBounds(nds, n.id, n.type === "module" ? 160 : 120, 36);
+            if (w !== (Number(n.style?.width) || 0) || h !== (Number(n.style?.height) || 0)) {
+              updated = updated.map((x) => (x.id === n.id ? { ...x, style: { ...x.style, width: w, height: h } } : x));
+            }
+          }
+          return updated;
+        });
+      }
 
       for (const node of deletedNodes) {
         if (node.type === "module") {
