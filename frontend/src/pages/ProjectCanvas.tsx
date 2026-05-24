@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { ReactFlow, Background, Controls, MiniMap, MarkerType, SelectionMode, type Node, type Edge, type Connection } from "@xyflow/react";
+import { ReactFlow, Background, Controls, MiniMap, MarkerType, SelectionMode, applyNodeChanges, applyEdgeChanges, type Node, type Edge, type Connection } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useCanvasStore } from "../store/canvasStore";
 import { assetsApi, edgesApi, parseApi } from "../api";
@@ -255,31 +255,8 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
       <div ref={reactFlowWrapper} style={{ flex: 1, position: "relative" }}>
         <ReactFlow
           nodes={nodes} edges={edges}
-          onNodesChange={(changes: any) => setNodes((nds: Node[]) => {
-            // Manually apply changes to avoid useNodesState dependency
-            let result = [...nds];
-            for (const c of changes) {
-              if (c.type === "position" && c.position) {
-                result = result.map((n) => n.id === c.id ? { ...n, position: c.position } : n);
-              } else if (c.type === "select") {
-                result = result.map((n) => n.id === c.id ? { ...n, selected: !!c.selected } : n);
-              } else if (c.type === "remove") {
-                result = result.filter((n) => n.id !== c.id);
-              } else if (c.type === "add") {
-                if (c.item) result.push(c.item as Node);
-              }
-            }
-            return result;
-          })}
-          onEdgesChange={(changes: any) => setEdges((eds: Edge[]) => {
-            let result = [...eds];
-            for (const c of changes) {
-              if (c.type === "add" && c.item) result.push(c.item as Edge);
-              if (c.type === "remove") result = result.filter((e) => e.id !== c.id);
-              if (c.type === "select") result = result.map((e) => e.id === c.id ? { ...e, selected: !!c.selected } : e);
-            }
-            return result;
-          })}
+          onNodesChange={(changes) => setNodes((nds) => applyNodeChanges(changes, nds))}
+          onEdgesChange={(changes) => setEdges((eds) => applyEdgeChanges(changes, eds))}
           onConnect={onConnect}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
