@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ThemeProvider } from "./theme/ThemeProvider";
 import Lobby from "./pages/Lobby";
 import ProjectCanvas from "./pages/ProjectCanvas";
 import { useCanvasStore } from "./store/canvasStore";
@@ -12,9 +13,19 @@ export default function App() {
     await loadProject(id);
   };
 
-  if (currentProject) {
-    return <ProjectCanvas projectId={currentProject} onBack={() => setCurrentProject(null)} />;
-  }
-
-  return <Lobby onOpenProject={handleOpenProject} />;
+  return (
+    <ThemeProvider>
+      {currentProject ? (
+        <ProjectCanvas
+          projectId={currentProject}
+          onBack={() => {
+            setCurrentProject(null);
+            useCanvasStore.getState().reset();
+          }}
+        />
+      ) : (
+        <Lobby onOpenProject={handleOpenProject} />
+      )}
+    </ThemeProvider>
+  );
 }
