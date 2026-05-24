@@ -214,13 +214,46 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
   }, []);
 
   // ── Throttle for container resize during drag ───────────────────
+  const lastResizeRef = useRef(0);
+
   const onNodeDrag = useCallback(
     (_event: any, node: Node) => {
-      if (spaceRef.current && node.parentId) {
-        spaceUsedThisDragRef.current = true;
+      // Space+drag: only track intent, NO container resize
+      if (spaceRef.current) {
+        if (node.parentId) spaceUsedThisDragRef.current = true;
+        return;
+      }
+
+      // Normal drag: throttled container bounds using LIVE drag position
+      if (!node.parentId) return;
+      const now = Date.now();
+      if (now - lastResizeRef.current < 150) return;
+
+      const parent = nodesRef.current.find((n) => n.id === node.parentId);
+      if (!parent || (parent.type !== "module" && parent.type !== "page")) return;
+      lastResizeRef.current = now;
+
+      const siblings = nodesRef.current.filter((n) => n.parentId === parent.id && n.id !== node.id);
+      const dw = Number(node.style?.width) || nodeDefaultSize(node.type, node.data?.label).w;
+      const dh = Number(node.style?.height) || nodeDefaultSize(node.type, node.data?.label).h;
+      let maxX = node.position.x + dw;
+      let maxY = node.position.y + dh;
+      for (const s of siblings) {
+        const sw = Number(s.style?.width) || nodeDefaultSize(s.type, s.data?.label).w;
+        const sh = Number(s.style?.height) || nodeDefaultSize(s.type, s.data?.label).h;
+        maxX = Math.max(maxX, s.position.x + sw);
+        maxY = Math.max(maxY, s.position.y + sh);
+      }
+      const minW = parent.type === "module" ? 160 : 120;
+      const w = Math.max(maxX + 40, minW);
+      const h = Math.max(maxY + 40, 36);
+      const pw = Number(parent.style?.width) || 0;
+      const ph = Number(parent.style?.height) || 0;
+      if (w !== pw || h !== ph) {
+        setNodes((nds) => nds.map((n) => (n.id === parent.id ? { ...n, style: { ...n.style, width: w, height: h } } : n)));
       }
     },
-    [],
+    [setNodes],
   );
 
   // ── Drag stop: detach (Space) → inject (depth priority) → recalc ─
@@ -244,7 +277,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
           });
           updated = updated.map((n) =>
             n.id === node.id
-              ? { ...n, parentId: undefined, extent: undefined, position: { x: abs.x, y: abs.y }, data: { ...n.data, isFloating: true } }
+              ? { ...n, parentId: undefined, position: { x: abs.x, y: abs.y }, data: { ...n.data, isFloating: true } }
               : n,
           );
         }
@@ -537,7 +570,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: p.name },
         parentId: p.moduleId || undefined,
-        extent: p.moduleId ? ("parent" as const) : undefined,
         style: { width: ps.w, height: ps.h, overflow: "visible", transition: "width 0.15s ease, height 0.15s ease" },
       });
     }
@@ -554,7 +586,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: f.name, fieldType: f.fieldType },
         parentId: f.pageId || undefined,
-        extent: f.pageId ? ("parent" as const) : undefined,
         style: { width: w, height: h },
       });
     }
@@ -571,7 +602,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         position: { x: relX, y: relY },
         data: { label: a.name, actionType: a.actionType, validations: a.validations },
         parentId: a.pageId || undefined,
-        extent: a.pageId ? ("parent" as const) : undefined,
         style: { width: w, height: h },
       });
     }
