@@ -2,7 +2,7 @@ import { type ReactNode, useEffect } from "react";
 import { theme } from "../../theme/tokens";
 
 interface Props {
-  open: boolean;
+  open?: boolean;
   onClose: () => void;
   title?: string;
   children: ReactNode;
@@ -10,7 +10,7 @@ interface Props {
 }
 
 export default function Modal({
-  open,
+  open = true,
   onClose,
   title,
   children,

@@ -9,8 +9,7 @@ export default function CreateProjectCard({ onClick }: Props) {
     <div
       onClick={onClick}
       style={{
-        width: 240,
-        padding: 18,
+        padding: 20,
         borderRadius: theme.radius.md,
         border: `2px dashed ${theme.colors.border.primary}`,
         cursor: "pointer",
@@ -18,8 +17,8 @@ export default function CreateProjectCard({ onClick }: Props) {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 10,
-        minHeight: 160,
+        gap: 12,
+        minHeight: 180,
         color: theme.colors.text.tertiary,
         fontSize: 14,
         transition: `all ${theme.transition}`,

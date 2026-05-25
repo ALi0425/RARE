@@ -74,7 +74,7 @@ const N8N_BASE = process.env.N8N_WEBHOOK_URL || "http://localhost:5678/webhook";
 
 async function tryN8nRefine(projectId: string, rawText: string) {
   try {
-    const response = await fetch(`${N8N_BASE}/rare-refine`, {
+    const response = await fetch(`${N8N_BASE}/req-optimize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ projectId, rawText }),
@@ -93,7 +93,7 @@ async function tryN8nEvaluate(
   entities: any[],
 ) {
   try {
-    const response = await fetch(`${N8N_BASE}/rare-evaluate`, {
+    const response = await fetch(`${N8N_BASE}/req-evaluate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ projectId, refinedText, entities }),

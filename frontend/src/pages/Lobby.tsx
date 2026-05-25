@@ -3,17 +3,18 @@ import { projectsApi } from "../api";
 import { theme } from "../theme/tokens";
 import ProjectGrid from "../components/lobby/ProjectGrid";
 import CreateProjectModal from "../components/lobby/CreateProjectModal";
+import RequirementInputModal from "../components/lobby/RequirementInputModal";
 
 interface Props { onOpenProject: (id: string) => void }
 
 export default function Lobby({ onOpenProject }: Props) {
   const [projects, setProjects] = useState<any[]>([]);
   const [showNew, setShowNew] = useState(false);
+  const [selectedProject, setSelectedProject] = useState<{ id: string; name: string } | null>(null);
 
   const load = useCallback(async () => {
     try { setProjects((await projectsApi.list()) || []); } catch (e) { console.error(e); }
   }, []);
-
   useEffect(() => { load(); }, [load]);
 
   const createProject = useCallback(async (name: string) => {
@@ -90,7 +91,10 @@ export default function Lobby({ onOpenProject }: Props) {
       {/* Project grid */}
       <ProjectGrid
         projects={projects}
-        onOpenProject={onOpenProject}
+        onOpenProject={(id) => {
+          const p = projects.find((x) => x.id === id);
+          setSelectedProject(p ? { id: p.id, name: p.name } : { id, name: "" });
+        }}
         onCreateClick={() => setShowNew(true)}
       />
 
@@ -99,6 +103,20 @@ export default function Lobby({ onOpenProject }: Props) {
         <CreateProjectModal
           onClose={() => setShowNew(false)}
           onCreate={createProject}
+        />
+      )}
+
+      {/* Requirement input capsule */}
+      {selectedProject && (
+        <RequirementInputModal
+          projectId={selectedProject.id}
+          projectName={selectedProject.name}
+          onComplete={() => {
+            const id = selectedProject.id;
+            setSelectedProject(null);
+            onOpenProject(id);
+          }}
+          onClose={() => setSelectedProject(null)}
         />
       )}
     </div>

@@ -18,15 +18,15 @@ export default function ProjectCard({ project, onClick }: Props) {
     <div
       onClick={onClick}
       style={{
-        width: 240,
-        padding: 18,
+        padding: 20,
         borderRadius: theme.radius.md,
         background: theme.colors.bg.surface,
         border: `1px solid ${theme.colors.border.subtle}`,
         cursor: "pointer",
         display: "flex",
         flexDirection: "column",
-        gap: 12,
+        gap: 14,
+        minHeight: 180,
         transition: `all ${theme.transition}`,
       }}
       onMouseOver={(e) => {
@@ -40,15 +40,15 @@ export default function ProjectCard({ project, onClick }: Props) {
     >
       <div
         style={{
-          width: 36,
-          height: 36,
-          borderRadius: 10,
+          width: 42,
+          height: 42,
+          borderRadius: 12,
           background: `${theme.colors.accent.module}20`,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           color: theme.colors.accent.module,
-          fontSize: 16,
+          fontSize: 18,
           fontWeight: 600,
         }}
       >

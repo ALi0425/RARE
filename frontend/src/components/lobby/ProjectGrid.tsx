@@ -22,9 +22,10 @@ export default function ProjectGrid({
   return (
     <div
       style={{
-        display: "flex",
-        flexWrap: "wrap",
+        display: "grid",
+        gridTemplateColumns: "repeat(4, 1fr)",
         gap: 16,
+        maxWidth: 1200,
       }}
     >
       <CreateProjectCard onClick={onCreateClick} />
