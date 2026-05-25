@@ -8,6 +8,7 @@ import {
   type EdgeChange,
 } from "@xyflow/react";
 import { request } from "../api/client";
+import { theme } from "../theme/tokens";
 
 // ── Types ──
 
@@ -62,7 +63,7 @@ function nodeDefaultSize(type?: string, label = "") {
     (s: number, c: string) => s + (c.charCodeAt(0) > 127 ? 14 : 8),
     0,
   );
-  return { w: Math.max(140, tw + 40), h: 32 };
+  return { w: Math.max(140, tw + 40), h: 52 };
 }
 
 export function convertProjectToFlow(
@@ -112,7 +113,7 @@ export function convertProjectToFlow(
       minX = Math.min(minX, rx);
       minY = Math.min(minY, ry);
       mx = Math.max(mx, rx + s.w);
-      my = Math.max(my, ry + 32);
+      my = Math.max(my, ry + s.h);
     }
     for (const a of allActions.filter((x) => x.pageId === p.id)) {
       has = true;
@@ -123,15 +124,15 @@ export function convertProjectToFlow(
       minX = Math.min(minX, rx);
       minY = Math.min(minY, ry);
       mx = Math.max(mx, rx + s.w);
-      my = Math.max(my, ry + 32);
+      my = Math.max(my, ry + s.h);
     }
     pageShift.set(p.id, {
       dx: Math.max(0, -(Number.isFinite(minX) ? minX : 0)),
       dy: Math.max(0, -(Number.isFinite(minY) ? minY : 0)),
     });
     pageSizes.set(p.id, {
-      w: Math.max(Number.isFinite(mx) ? mx - minX + 32 : 120, 120),
-      h: has ? Math.max(Number.isFinite(my) ? my - minY + 24 : 36, 36) : 36,
+      w: Math.max(Number.isFinite(mx) ? mx - Math.min(minX, 0) + 16 : 120, 120),
+      h: has ? Math.max(Number.isFinite(my) ? my - Math.min(minY, 0) + 12 : 36, 36) : 36,
     });
   }
 
@@ -159,8 +160,8 @@ export function convertProjectToFlow(
       dx: Math.max(0, -(Number.isFinite(minX) ? minX : 0)),
       dy: Math.max(0, -(Number.isFinite(minY) ? minY : 0)),
     });
-    const w = Math.max(Number.isFinite(mx) ? mx - minX + 32 : 160, 160),
-      h = has ? Math.max(Number.isFinite(my) ? my - minY + 24 : 36, 36) : 36;
+    const w = Math.max(Number.isFinite(mx) ? mx - Math.min(minX, 0) + 32 : 160, 160),
+      h = has ? Math.max(Number.isFinite(my) ? my - Math.min(minY, 0) + 24 : 36, 36) : 36;
     fn.push({
       id: m.id,
       type: "module",
@@ -170,7 +171,9 @@ export function convertProjectToFlow(
         width: w,
         height: h,
         overflow: "visible",
-        transition: "width 0.15s ease, height 0.15s ease",
+        border: `1px solid ${theme.colors.accent.module}`,
+        borderRadius: 10,
+        boxSizing: "border-box",
       },
     });
   }
@@ -193,7 +196,9 @@ export function convertProjectToFlow(
         width: ps.w,
         height: ps.h,
         overflow: "visible",
-        transition: "width 0.15s ease, height 0.15s ease",
+        border: `1px solid ${theme.colors.accent.page}`,
+        borderRadius: 10,
+        boxSizing: "border-box",
       },
     });
   }

@@ -8,7 +8,6 @@ import ContextMenu from "../components/canvas/menus/ContextMenu";
 import EdgeEditDialog from "../components/canvas/menus/EdgeEditDialog";
 import { useNodeOperations } from "../components/canvas/hooks/useNodeOperations";
 import Spinner from "../components/ui/Spinner";
-import SmartInputBar from "../components/inference/SmartInputBar";
 import InferenceOutput from "../components/inference/InferenceOutput";
 import CanvasDiffOverlay from "../components/inference/CanvasDiffOverlay";
 import DecisionPanel from "../components/inference/DecisionPanel";
@@ -43,11 +42,9 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
   const { deleteNodeById, createNewNode, onLabelSave } =
     useNodeOperations(projectId);
 
-  const [debugInfo, setDebugInfo] = useState("");
   useEffect(() => {
     resetInference();
-    setDebugInfo(`loadProject ready, nodes=${nodes.length}, edges=${edges.length}, loading=${loading}`);
-  }, [resetInference, nodes.length, edges.length, loading]);
+  }, [resetInference]);
 
   // ── Context menu ──
   const handleContextMenu = useCallback(
@@ -122,7 +119,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
             style={{
               position: "absolute",
               top: 12,
-              left: showTimeline ? 270 : 12,
+              right: showTimeline ? 270 : 12,
               zIndex: 20,
               padding: "6px 10px",
               background: theme.colors.bg.surface,
@@ -132,7 +129,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
               fontSize: 12,
               cursor: "pointer",
               fontFamily: theme.font,
-              transition: `left ${theme.transition}`,
+              transition: `right ${theme.transition}`,
             }}
           >
             {showTimeline ? "✕" : "⏱"}
@@ -166,13 +163,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         </div>
       </div>
 
-      {/* Smart input bar */}
-      <SmartInputBar projectId={projectId} />
-
-      {/* Debug overlay */}
-      <div style={{ position: "fixed", bottom: 60, right: 12, zIndex: 9999, background: "rgba(0,0,0,0.8)", color: "#0f0", fontSize: 11, padding: "6px 10px", borderRadius: 4, fontFamily: "monospace", maxWidth: 400, pointerEvents: "none" }}>
-        {debugInfo}
-      </div>
     </div>
   );
 }

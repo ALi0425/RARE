@@ -22,7 +22,7 @@ export default function VersionTimeline({
       style={{
         width: 260,
         background: theme.colors.bg.surface,
-        borderRight: `1px solid ${theme.colors.border.subtle}`,
+        borderLeft: `1px solid ${theme.colors.border.subtle}`,
         display: "flex",
         flexDirection: "column",
         height: "100%",

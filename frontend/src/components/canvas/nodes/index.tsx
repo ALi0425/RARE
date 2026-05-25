@@ -12,21 +12,24 @@ export const PageNode = memo(({ id, data }: NodeProps) => (
 ));
 PageNode.displayName = "PageNode";
 
-export const FieldNode = memo(({ id, data }: NodeProps) => (
-  <NodeBox id={id} data={data} type="field">
-    {data?.fieldType && (
-      <span
-        style={{
-          fontSize: 9,
-          color: "#8a8a8e",
-          marginTop: 1,
-        }}
-      >
-        {data.fieldType}
-      </span>
-    )}
-  </NodeBox>
-));
+export const FieldNode = memo(({ id, data }: NodeProps) => {
+  console.log("🔴 FieldNode rendered", id, data?.label);
+  return (
+    <NodeBox id={id} data={data} type="field">
+      {data?.fieldType && (
+        <span
+          style={{
+            fontSize: 9,
+            color: "#8a8a8e",
+            marginTop: 1,
+          }}
+        >
+          {data.fieldType}
+        </span>
+      )}
+    </NodeBox>
+  );
+});
 FieldNode.displayName = "FieldNode";
 
 export const ActionNode = memo(({ id, data }: NodeProps) => (

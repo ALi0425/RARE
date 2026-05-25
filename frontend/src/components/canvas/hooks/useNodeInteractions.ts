@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 import type { Node } from "@xyflow/react";
+import { useReactFlow } from "@xyflow/react";
 import { useCanvasStore } from "../../../store/canvasStore";
 import { request } from "../../../api/client";
 
@@ -12,7 +13,7 @@ function nodeDefaultSize(type?: string, label = "") {
     (s, c) => s + (c.charCodeAt(0) > 127 ? 14 : 8),
     0,
   );
-  return { w: Math.max(140, tw + 40), h: 32 };
+  return { w: Math.max(140, tw + 40), h: 52 };
 }
 
 function getNodeAbsPosition(node: Node, allNodes: Node[]) {
@@ -53,8 +54,8 @@ function computeFluidBounds(nodes: Node[], containerId: string, minW = 160, minH
   }
   if (!Number.isFinite(mx)) return { w: minW, h: minH };
   return {
-    w: Math.max(mx - minX + 32, minW),
-    h: Math.max(my - minY + 24, minH),
+    w: Math.max(mx - Math.min(minX, 0) + 16, minW),
+    h: Math.max(my - Math.min(minY, 0) + 12, minH),
   };
 }
 
@@ -114,6 +115,7 @@ export function useNodeInteractions(projectId: string) {
   const spaceRef = useRef(false);
   const spaceUsedRef = useRef(false);
   const getNodes = useCallback(() => useCanvasStore.getState().nodes, []);
+  const rf = useReactFlow();
   const dragResizeThrottle = useRef(0);
 
   // Space key tracking
@@ -144,7 +146,8 @@ export function useNodeInteractions(projectId: string) {
       if (now - dragResizeThrottle.current < 50) return;
       dragResizeThrottle.current = now;
 
-      const allNodes = getNodes();
+      const liveNodes = rf.getNodes();
+      const allNodes = liveNodes.length > 0 ? liveNodes : useCanvasStore.getState().nodes;
       const merged = allNodes.map((n) =>
         n.id === node.id
           ? { ...n, position: { x: node.position.x, y: node.position.y } }
@@ -163,36 +166,31 @@ export function useNodeInteractions(projectId: string) {
         // Direct DOM resize to avoid disrupting ReactFlow's drag state
         const el = document.querySelector(`[data-id="${node.parentId}"]`) as HTMLElement | null;
         if (el) {
+          el.style.transition = "none";
           el.style.width = `${bounds.w}px`;
           el.style.height = `${bounds.h}px`;
+          // Restore transition after drag ends
+          requestAnimationFrame(() => { el.style.transition = ""; });
         }
       }
     }
-  }, [getNodes]);
+  }, [getNodes, rf]);
 
   const onNodeDragStop = useCallback(
     async (_event: any, node: Node) => {
       const wasSpace = spaceUsedRef.current && spaceRef.current;
       spaceUsedRef.current = false;
 
-      // Skip clicks without actual drag (position unchanged)
-      const prev = getNodes().find((n) => n.id === node.id);
-      if (
-        prev &&
-        prev.position.x === node.position.x &&
-        prev.position.y === node.position.y
-      ) {
-        return;
-      }
-
-      const oldNodes = getNodes();
+      // Read live nodes from ReactFlow (not zustand — avoids stale positions)
+      const liveNodes = rf.getNodes();
+      const oldNodes = liveNodes.length > 0 ? liveNodes : useCanvasStore.getState().nodes;
       // Merge the dragged node's new position into the snapshot
       let updatedNodes = oldNodes.map((n) =>
         n.id === node.id
           ? { ...n, position: { x: node.position.x, y: node.position.y } }
           : n,
       );
-      const abs = getNodeAbsPosition(node, oldNodes);
+      const abs = getNodeAbsPosition(node, updatedNodes);
       const parentsToResize = new Set<string>();
 
       if (wasSpace && node.parentId) {
@@ -213,19 +211,19 @@ export function useNodeInteractions(projectId: string) {
             : node.type === "field" || node.type === "action"
               ? ["page"]
               : [];
-        const containers = oldNodes
+        const containers = updatedNodes
           .filter(
             (n) =>
               n.id !== node.id && validParentTypes.includes(n.type),
           )
-          .map((c) => ({ c, depth: containerDepth(c, oldNodes) }));
+          .map((c) => ({ c, depth: containerDepth(c, updatedNodes) }));
         const matches: Array<{
           c: Node;
           depth: number;
           overlap: number;
         }> = [];
         for (const { c, depth } of containers) {
-          const ca = getNodeAbsPosition(c, oldNodes);
+          const ca = getNodeAbsPosition(c, updatedNodes);
           const cw = Number(c.style?.width) || 160;
           const ch = Number(c.style?.height) || 36;
           const ox = Math.max(
@@ -245,7 +243,7 @@ export function useNodeInteractions(projectId: string) {
 
         if (matches.length > 0 && matches[0].c.id !== node.parentId) {
           const best = matches[0].c;
-          const ba = getNodeAbsPosition(best, oldNodes);
+          const ba = getNodeAbsPosition(best, updatedNodes);
           const rx = Math.round(abs.x - ba.x);
           const ry = Math.round(abs.y - ba.y);
           updateEntityParent(
@@ -286,6 +284,7 @@ export function useNodeInteractions(projectId: string) {
               ? {
                   ...n,
                   parentId: undefined,
+                  extent: undefined,
                   position: { x: Math.round(abs.x), y: Math.round(abs.y) },
                 }
               : n,
@@ -309,20 +308,20 @@ export function useNodeInteractions(projectId: string) {
               : [];
 
         // Check for re-injection into a different container
-        const containers = oldNodes
+        const containers = updatedNodes
           .filter(
             (n) =>
               n.id !== node.id &&
               validParentTypes.includes(n.type),
           )
-          .map((c) => ({ c, depth: containerDepth(c, oldNodes) }));
+          .map((c) => ({ c, depth: containerDepth(c, updatedNodes) }));
         const matches: Array<{
           c: Node;
           depth: number;
           overlap: number;
         }> = [];
         for (const { c, depth } of containers) {
-          const ca = getNodeAbsPosition(c, oldNodes);
+          const ca = getNodeAbsPosition(c, updatedNodes);
           const cw = Number(c.style?.width) || 160;
           const ch = Number(c.style?.height) || 36;
           const ox = Math.max(
@@ -344,7 +343,7 @@ export function useNodeInteractions(projectId: string) {
           matches.length > 0 ? matches[0].c : null;
         if (bestContainer && bestContainer.id !== node.parentId) {
           // Reparent to new container
-          const ba = getNodeAbsPosition(bestContainer, oldNodes);
+          const ba = getNodeAbsPosition(bestContainer, updatedNodes);
           const rx = Math.round(abs.x - ba.x);
           const ry = Math.round(abs.y - ba.y);
           updateEntityParent(
@@ -409,20 +408,20 @@ export function useNodeInteractions(projectId: string) {
             : node.type === "field" || node.type === "action"
               ? ["page"]
               : [];
-        const containers = oldNodes
+        const containers = updatedNodes
           .filter(
             (n) =>
               n.id !== node.id &&
               validParentTypes.includes(n.type),
           )
-          .map((c) => ({ c, depth: containerDepth(c, oldNodes) }));
+          .map((c) => ({ c, depth: containerDepth(c, updatedNodes) }));
         const matches: Array<{
           c: Node;
           depth: number;
           overlap: number;
         }> = [];
         for (const { c, depth } of containers) {
-          const ca = getNodeAbsPosition(c, oldNodes);
+          const ca = getNodeAbsPosition(c, updatedNodes);
           const cw = Number(c.style?.width) || 160;
           const ch = Number(c.style?.height) || 36;
           const ox = Math.max(
@@ -441,7 +440,7 @@ export function useNodeInteractions(projectId: string) {
         );
         if (matches.length > 0) {
           const best = matches[0].c;
-          const ba = getNodeAbsPosition(best, oldNodes);
+          const ba = getNodeAbsPosition(best, updatedNodes);
           const rx = Math.round(nPos.x - ba.x);
           const ry = Math.round(nPos.y - ba.y);
           updateEntityParent(projectId, node.id, node.type, best.id);
@@ -476,7 +475,7 @@ export function useNodeInteractions(projectId: string) {
       // ── Sync to store (triggers ReactFlow update via loadKey) ──
       useCanvasStore.getState().patchNodes(updatedNodes);
     },
-    [projectId, getNodes],
+    [projectId, rf],
   );
 
   return {

@@ -68,6 +68,7 @@ function EditableLabel({
         fontWeight: 500,
         color: theme.colors.text.primary,
         letterSpacing: -0.1,
+        whiteSpace: "nowrap",
       }}
       onDoubleClick={() => setEditing(true)}
       title="双击编辑"
@@ -122,21 +123,20 @@ export default function NodeBox({ id, data, type, children }: NodeBoxProps) {
 
   return (
     <div>
-      <div
+      <div data-v3-check="true"
         style={{
-          background: isContainer ? theme.colors.bg.elevated : m.bg,
-          border: `1px solid ${m.accent}40`,
+          background: m.bg,
+          border: isContainer ? "none" : `1px solid ${m.accent}88`,
           borderRadius: isContainer ? theme.radius.md : theme.radius.sm,
           padding: isContainer ? "12px 16px" : "6px 12px",
           width: "100%",
           height: "100%",
           boxSizing: "border-box",
-          display: "flex",
-          flexDirection: "column",
           position: "relative",
           cursor: "grab",
           fontFamily: theme.font,
           color: theme.colors.text.primary,
+          boxShadow: isContainer ? "inset 0 0 0 1px rgba(255,255,255,0.03)" : undefined,
         }}
         title={diffTooltip}
       >
@@ -190,20 +190,11 @@ export default function NodeBox({ id, data, type, children }: NodeBoxProps) {
           id="bottom"
         />
 
-        {/* Label chip + name inline */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            marginBottom: isContainer ? 8 : 0,
-            minWidth: 0,
-            flexWrap: "nowrap",
-          }}
-        >
-          <div
+        {/* Label chip + name inline — force single line */}
+        <div style={{ whiteSpace: "nowrap", marginBottom: isContainer ? 8 : 0 }}>
+          <span
             style={{
-              flexShrink: 0,
+              display: "inline-block",
               background: m.accent,
               color: theme.colors.text.inverse,
               fontSize: 9,
@@ -213,15 +204,23 @@ export default function NodeBox({ id, data, type, children }: NodeBoxProps) {
               lineHeight: "16px",
               letterSpacing: 0.3,
               opacity: 0.9,
+              verticalAlign: "middle",
             }}
           >
             {m.label}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
+          </span>
+          <span
+            style={{
+              verticalAlign: "middle",
+              marginLeft: 6,
+              display: "inline",
+            }}
+          >
             <EditableLabel value={data?.label || ""} nodeId={id} />
-          </div>
+          </span>
+          <span style={{ fontSize: 8, color: "#ff0", verticalAlign: "middle" }}>v3</span>
         </div>
-        {children}
+        {isContainer ? children : <div style={{ marginTop: 4 }}>{children}</div>}
       </div>
       {diffTooltip && (
         <div

@@ -7,4 +7,5 @@ export const nodeTypes = {
   action: ActionNode,
 };
 
-export { setOnLabelSave } from "./nodes/shared/NodeBox";
+import { setOnLabelSave as _setOnLabelSave } from "./nodes/shared/NodeBox";
+export const setOnLabelSave = _setOnLabelSave;

@@ -8,7 +8,7 @@ function nodeDefaultSize(type?: string, label = "") {
   if (type === "module") return { w: 160, h: 36 };
   if (type === "page") return { w: 120, h: 36 };
   const tw = [...label].reduce((s, c) => s + (c.charCodeAt(0) > 127 ? 14 : 8), 0);
-  return { w: Math.max(140, tw + 40), h: 32 };
+  return { w: Math.max(140, tw + 40), h: 52 };
 }
 
 function getNodeAbsPosition(node: Node, allNodes: Node[]) {
@@ -46,6 +46,7 @@ export function useNodeOperations(projectId: string) {
           filtered.push({
             ...child,
             parentId: undefined,
+            extent: undefined,
             position: { x: abs.x, y: abs.y },
             data: { ...child.data },
           });
@@ -145,6 +146,9 @@ export function useNodeOperations(projectId: string) {
         data: { label },
         parentId: parentId || undefined,
         extent: parentId ? ("parent" as const) : undefined,
+        style: (type === "module" || type === "page")
+          ? { border: type === "module" ? "1px solid #5e6ad2" : "1px solid #34d399", borderRadius: 10, boxSizing: "border-box" as const }
+          : undefined,
       };
 
       const apis: Record<string, string> = {
