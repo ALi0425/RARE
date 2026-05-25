@@ -157,24 +157,61 @@ interface ModuleItem { name: string; pages: PageItem[] }
 interface ParseResult { modules: ModuleItem[] }
 
 async function parseWithFallback(text: string): Promise<ParseResult> {
-  // Send through n8n workflow first (fast pass-through, records execution in n8n)
+  // Try asset-ingestion webhook (n8n → Ollama → structured JSON)
   try {
-    await sendToN8n(text);
-  } catch {
-    // n8n unavailable — fall through, still do regex
+    const result = await callAssetIngestion(text);
+    if (result && result.modules && result.modules.length > 0) {
+      return convertFromAssetResult(result);
+    }
+  } catch (err) {
+    console.warn("Asset ingestion n8n workflow failed, falling back to regex:", err);
   }
+  // Fallback to regex when n8n is unavailable
   return regexParse(text);
 }
 
-async function sendToN8n(text: string): Promise<void> {
-  const response = await fetch(`${N8N_WEBHOOK_URL}/rare-regex-parse`, {
+interface AssetModule {
+  module_name: string;
+  pages?: Array<{
+    page_name: string;
+    fields?: Array<{ field_name: string; field_type?: string }>;
+    actions?: Array<{ action_name: string; description?: string }>;
+  }>;
+}
+
+interface AssetResponse {
+  success: boolean;
+  modules: AssetModule[];
+}
+
+async function callAssetIngestion(text: string): Promise<AssetResponse | null> {
+  const response = await fetch(`${N8N_WEBHOOK_URL}/asset-ingestion`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-    signal: AbortSignal.timeout(5000),
+    body: JSON.stringify({ type: "text", text }),
+    signal: AbortSignal.timeout(60000),
   });
-  if (!response.ok) throw new Error(`n8n returned ${response.status}`);
-  // Data successfully passed through n8n
+  if (!response.ok) throw new Error(`asset-ingestion returned ${response.status}`);
+  return await response.json();
+}
+
+function convertFromAssetResult(asset: AssetResponse): ParseResult {
+  const modules: ModuleItem[] = (asset.modules || []).map((m: AssetModule) => ({
+    name: m.module_name || "系统",
+    pages: (m.pages || []).map((p) => ({
+      name: p.page_name || "页面",
+      fields: (p.fields || []).map((f) => ({
+        name: f.field_name || f.field_name,
+        fieldType: f.field_type || "string",
+      })),
+      actions: (p.actions || []).map((a) => ({
+        name: a.action_name || a.action_name,
+        actionType: "operation",
+        validations: [],
+      })),
+    })),
+  }));
+  return { modules };
 }
 
 function regexParse(text: string): ParseResult {

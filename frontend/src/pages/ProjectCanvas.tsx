@@ -97,13 +97,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
 
       {/* Canvas + Timeline */}
       <div style={{ flex: 1, position: "relative", display: "flex", overflow: "hidden" }}>
-        {showTimeline && (
-          <VersionTimeline
-            projectId={projectId}
-            onClose={() => setShowTimeline(false)}
-          />
-        )}
-
         <div style={{ flex: 1, position: "relative" }}>
           <CanvasCore
             projectId={projectId}
@@ -161,6 +154,14 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
             />
           )}
         </div>
+
+        {/* Version history — right side */}
+        {showTimeline && (
+          <VersionTimeline
+            projectId={projectId}
+            onClose={() => setShowTimeline(false)}
+          />
+        )}
       </div>
 
     </div>
