@@ -55,6 +55,8 @@ function EditableLabel({
           fontWeight: 500,
           color: theme.colors.text.primary,
           fontFamily: theme.font,
+          width: "100%",
+          boxSizing: "border-box",
         }}
       />
     );
@@ -134,6 +136,7 @@ export default function NodeBox({ id, data, type, children }: NodeBoxProps) {
           position: "relative",
           cursor: "grab",
           fontFamily: theme.font,
+          color: theme.colors.text.primary,
         }}
         title={diffTooltip}
       >
@@ -187,17 +190,20 @@ export default function NodeBox({ id, data, type, children }: NodeBoxProps) {
           id="bottom"
         />
 
-        {/* Label chip */}
+        {/* Label chip + name inline */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
             gap: 6,
             marginBottom: isContainer ? 8 : 0,
+            minWidth: 0,
+            flexWrap: "nowrap",
           }}
         >
           <div
             style={{
+              flexShrink: 0,
               background: m.accent,
               color: theme.colors.text.inverse,
               fontSize: 9,
@@ -211,9 +217,10 @@ export default function NodeBox({ id, data, type, children }: NodeBoxProps) {
           >
             {m.label}
           </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <EditableLabel value={data?.label || ""} nodeId={id} />
+          </div>
         </div>
-
-        <EditableLabel value={data?.label || ""} nodeId={id} />
         {children}
       </div>
       {diffTooltip && (

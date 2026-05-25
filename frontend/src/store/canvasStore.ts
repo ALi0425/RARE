@@ -38,9 +38,14 @@ interface CanvasStore {
   error: string | null;
   diffState: DiffState | null;
   loadKey: number;
+  viewportCenter: { x: number; y: number } | null;
 
+  setNodes: (updater: Node[] | ((prev: Node[]) => Node[])) => void;
+  setEdges: (updater: Edge[] | ((prev: Edge[]) => Edge[])) => void;
   syncNodes: (nodes: Node[]) => void;
   syncEdges: (edges: Edge[]) => void;
+  patchNodes: (nodes: Node[]) => void;
+  patchEdges: (edges: Edge[]) => void;
 
   loadProject: (id: string) => Promise<void>;
   applyDiff: (diff: DiffState) => void;
@@ -89,44 +94,73 @@ export function convertProjectToFlow(
   for (const a of data.actions || [])
     allActions.push({ ...a, pageId: null });
 
-  // Page sizes
+  // Page sizes + shifts (normalize children into positive coordinate space)
   const pageSizes = new Map<string, { w: number; h: number }>();
+  const pageShift = new Map<string, { dx: number; dy: number }>();
   for (const p of allPages) {
-    let mx = 0,
-      my = 0,
+    let minX = Infinity,
+      minY = Infinity,
+      mx = -Infinity,
+      my = -Infinity,
       has = false;
     for (const f of allFields.filter((x) => x.pageId === p.id)) {
       has = true;
       const s = nodeDefaultSize("field", f.name);
-      mx = Math.max(mx, f.posX - p.posX + s.w);
-      my = Math.max(my, f.posY - p.posY + 32);
+      const rx = f.posX - p.posX;
+      const ry = f.posY - p.posY;
+      if (!Number.isFinite(rx) || !Number.isFinite(ry)) continue;
+      minX = Math.min(minX, rx);
+      minY = Math.min(minY, ry);
+      mx = Math.max(mx, rx + s.w);
+      my = Math.max(my, ry + 32);
     }
     for (const a of allActions.filter((x) => x.pageId === p.id)) {
       has = true;
       const s = nodeDefaultSize("action", a.name);
-      mx = Math.max(mx, a.posX - p.posX + s.w);
-      my = Math.max(my, a.posY - p.posY + 32);
+      const rx = a.posX - p.posX;
+      const ry = a.posY - p.posY;
+      if (!Number.isFinite(rx) || !Number.isFinite(ry)) continue;
+      minX = Math.min(minX, rx);
+      minY = Math.min(minY, ry);
+      mx = Math.max(mx, rx + s.w);
+      my = Math.max(my, ry + 32);
     }
+    pageShift.set(p.id, {
+      dx: Math.max(0, -(Number.isFinite(minX) ? minX : 0)),
+      dy: Math.max(0, -(Number.isFinite(minY) ? minY : 0)),
+    });
     pageSizes.set(p.id, {
-      w: Math.max(mx + 40, 120),
-      h: has ? Math.max(my + 40, 36) : 36,
+      w: Math.max(Number.isFinite(mx) ? mx - minX + 32 : 120, 120),
+      h: has ? Math.max(Number.isFinite(my) ? my - minY + 24 : 36, 36) : 36,
     });
   }
 
-  // Modules
+  // Module sizes + shifts (normalize pages into positive coordinate space)
+  const moduleShift = new Map<string, { dx: number; dy: number }>();
   for (const m of data.modules || []) {
     const kids = allPages.filter((p) => p.moduleId === m.id);
-    let mx = 0,
-      my = 0,
+    let minX = Infinity,
+      minY = Infinity,
+      mx = -Infinity,
+      my = -Infinity,
       has = false;
     for (const p of kids) {
       has = true;
       const ps = pageSizes.get(p.id) || { w: 120, h: 36 };
-      mx = Math.max(mx, p.posX - m.posX + ps.w);
-      my = Math.max(my, p.posY - m.posY + ps.h);
+      const rx = p.posX - m.posX;
+      const ry = p.posY - m.posY;
+      if (!Number.isFinite(rx) || !Number.isFinite(ry)) continue;
+      minX = Math.min(minX, rx);
+      minY = Math.min(minY, ry);
+      mx = Math.max(mx, rx + ps.w);
+      my = Math.max(my, ry + ps.h);
     }
-    const w = Math.max(mx + 40, 160),
-      h = has ? Math.max(my + 40, 36) : 36;
+    moduleShift.set(m.id, {
+      dx: Math.max(0, -(Number.isFinite(minX) ? minX : 0)),
+      dy: Math.max(0, -(Number.isFinite(minY) ? minY : 0)),
+    });
+    const w = Math.max(Number.isFinite(mx) ? mx - minX + 32 : 160, 160),
+      h = has ? Math.max(Number.isFinite(my) ? my - minY + 24 : 36, 36) : 36;
     fn.push({
       id: m.id,
       type: "module",
@@ -146,11 +180,12 @@ export function convertProjectToFlow(
     const mp = p.moduleId ? mPos.get(p.moduleId) : null;
     const rx = mp ? p.posX - mp.x : p.posX;
     const ry = mp ? p.posY - mp.y : p.posY;
+    const msh = p.moduleId ? (moduleShift.get(p.moduleId) || { dx: 0, dy: 0 }) : { dx: 0, dy: 0 };
     const ps = pageSizes.get(p.id) || { w: 300, h: 60 };
     fn.push({
       id: p.id,
       type: "page",
-      position: { x: rx, y: ry },
+      position: { x: rx + msh.dx, y: ry + msh.dy },
       data: { label: p.name },
       parentId: p.moduleId || undefined,
       extent: p.moduleId ? ("parent" as const) : undefined,
@@ -168,11 +203,12 @@ export function convertProjectToFlow(
     const pp = f.pageId ? pagePos.get(f.pageId) : null;
     const rx = pp ? f.posX - pp.x : f.posX;
     const ry = pp ? f.posY - pp.y : f.posY;
+    const sh = f.pageId ? (pageShift.get(f.pageId) || { dx: 0, dy: 0 }) : { dx: 0, dy: 0 };
     const s = nodeDefaultSize("field", f.name);
     fn.push({
       id: f.id,
       type: "field",
-      position: { x: rx, y: ry },
+      position: { x: rx + sh.dx, y: ry + sh.dy },
       data: { label: f.name, fieldType: f.fieldType },
       parentId: f.pageId || undefined,
       extent: f.pageId ? ("parent" as const) : undefined,
@@ -185,11 +221,12 @@ export function convertProjectToFlow(
     const pp = a.pageId ? pagePos.get(a.pageId) : null;
     const rx = pp ? a.posX - pp.x : a.posX;
     const ry = pp ? a.posY - pp.y : a.posY;
+    const sh = a.pageId ? (pageShift.get(a.pageId) || { dx: 0, dy: 0 }) : { dx: 0, dy: 0 };
     const s = nodeDefaultSize("action", a.name);
     fn.push({
       id: a.id,
       type: "action",
-      position: { x: rx, y: ry },
+      position: { x: rx + sh.dx, y: ry + sh.dy },
       data: { label: a.name, actionType: a.actionType },
       parentId: a.pageId || undefined,
       extent: a.pageId ? ("parent" as const) : undefined,
@@ -241,6 +278,20 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   error: null,
   diffState: null,
   loadKey: 0,
+  viewportCenter: null,
+
+  setNodes: (updater) => {
+    set((state) => {
+      const next = typeof updater === "function" ? updater(state.nodes) : updater;
+      return { nodes: next, loadKey: state.loadKey + 1 };
+    });
+  },
+  setEdges: (updater) => {
+    set((state) => {
+      const next = typeof updater === "function" ? updater(state.edges) : updater;
+      return { edges: next, loadKey: state.loadKey + 1 };
+    });
+  },
 
   syncNodes: (nodes) => {
     set((state) => {
@@ -254,6 +305,15 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       if (edgesEqual(state.edges, edges)) return {};
       return { edges };
     });
+  },
+
+  /** Lightweight update — replaces nodes and bumps loadKey, no loading/API fetch */
+  patchNodes: (nodes) => {
+    set((state) => ({ nodes, loadKey: state.loadKey + 1 }));
+  },
+
+  patchEdges: (edges) => {
+    set((state) => ({ edges, loadKey: state.loadKey + 1 }));
   },
 
   loadProject: async (id: string) => {
@@ -320,5 +380,6 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       error: null,
       diffState: null,
       loadKey: 0,
+      viewportCenter: null,
     }),
 }));

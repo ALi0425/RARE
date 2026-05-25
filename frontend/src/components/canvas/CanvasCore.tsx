@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -6,9 +6,9 @@ import {
   Controls,
   MiniMap,
   SelectionMode,
+  useReactFlow,
   useNodesState,
   useEdgesState,
-  useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useCanvasStore } from "../../store/canvasStore";
@@ -41,46 +41,56 @@ function CanvasCoreInner({
   const storeNodes = useCanvasStore((s) => s.nodes);
   const storeEdges = useCanvasStore((s) => s.edges);
   const loadKey = useCanvasStore((s) => s.loadKey);
-  const syncNodes = useCanvasStore((s) => s.syncNodes);
-  const syncEdges = useCanvasStore((s) => s.syncEdges);
 
+  // Local ReactFlow state — initialized once from store
   const [nodes, setNodes, onNodesChange] = useNodesState(storeNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(storeEdges);
-  const reactFlowInstance = useReactFlow();
+  const rf = useReactFlow();
+  const prevKey = useRef(loadKey);
 
-  // Sync from store to ReactFlow when loadKey changes (loadProject / applyDiff)
+  // Sync external store → local state only on loadKey change
   useEffect(() => {
+    if (loadKey === prevKey.current) return;
+    prevKey.current = loadKey;
     setNodes(storeNodes);
     setEdges(storeEdges);
-    requestAnimationFrame(() => {
-      reactFlowInstance.fitView({ padding: 0.3, maxZoom: 1.5, duration: 200 });
-    });
   }, [loadKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Sync from ReactFlow internal state back to Zustand (for header, etc.)
-  useEffect(() => {
-    syncNodes(nodes);
-  }, [nodes, syncNodes]);
-
-  useEffect(() => {
-    syncEdges(edges);
-  }, [edges, syncEdges]);
 
   const { onNodeDrag, onNodeDragStop, initSpaceListeners } =
     useNodeInteractions(projectId);
   const { onConnect } = useNodeOperations(projectId);
 
-  // Init space key listeners
   useEffect(() => {
     const cleanup = initSpaceListeners();
     return cleanup;
   }, [initSpaceListeners]);
 
-  // Register label save handler
   useEffect(() => {
     setOnLabelSave(onLabelSave);
     return () => setOnLabelSave(null);
   }, [onLabelSave]);
+
+  // One-time fitView
+  const fitted = useRef(false);
+  useEffect(() => {
+    if (fitted.current) return;
+    fitted.current = true;
+    requestAnimationFrame(() => rf.fitView({ padding: 0.3, maxZoom: 1.5 }));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Track viewport center for new node placement
+  const updateViewportCenter = useCallback(() => {
+    try {
+      const center = rf.screenToFlowPosition({
+        x: window.innerWidth / 2,
+        y: window.innerHeight / 2,
+      });
+      useCanvasStore.setState({ viewportCenter: center });
+    } catch {}
+  }, [rf]);
+  useEffect(() => {
+    updateViewportCenter();
+  }, [updateViewportCenter]);
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
@@ -88,9 +98,7 @@ function CanvasCoreInner({
   }, []);
 
   return (
-    <div
-      style={{ width: "100%", height: "100%", position: "relative" }}
-    >
+    <div style={{ width: "100%", height: "100%", position: "relative" }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -111,6 +119,7 @@ function CanvasCoreInner({
           e.preventDefault();
           onEdgeDoubleClick(edge);
         }}
+        onMoveEnd={updateViewportCenter}
         onDragOver={onDragOver}
         nodeTypes={nodeTypes}
         defaultEdgeOptions={{
@@ -123,7 +132,7 @@ function CanvasCoreInner({
         multiSelectionKeyCode="Shift"
         panOnScroll={false}
         zoomOnScroll={true}
-        panOnDrag={[2]}
+        panOnDrag={[0]}
         selectNodesOnDrag={true}
         nodesDraggable={true}
         style={{ background: theme.colors.bg.app }}

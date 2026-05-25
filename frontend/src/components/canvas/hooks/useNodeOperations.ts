@@ -4,6 +4,13 @@ import { MarkerType } from "@xyflow/react";
 import { request } from "../../../api/client";
 import { useCanvasStore } from "../../../store/canvasStore";
 
+function nodeDefaultSize(type?: string, label = "") {
+  if (type === "module") return { w: 160, h: 36 };
+  if (type === "page") return { w: 120, h: 36 };
+  const tw = [...label].reduce((s, c) => s + (c.charCodeAt(0) > 127 ? 14 : 8), 0);
+  return { w: Math.max(140, tw + 40), h: 32 };
+}
+
 function getNodeAbsPosition(node: Node, allNodes: Node[]) {
   let x = node.position.x,
     y = node.position.y;
@@ -87,11 +94,57 @@ export function useNodeOperations(projectId: string) {
               ? "新字段"
               : "新操作");
 
+      // Position at viewport center with slight random offset
+      const vpCenter = useCanvasStore.getState().viewportCenter;
+      const pos = vpCenter
+        ? {
+            x: vpCenter.x + (Math.random() - 0.5) * 80,
+            y: vpCenter.y + (Math.random() - 0.5) * 80,
+          }
+        : {
+            x: 200 + Math.random() * 400,
+            y: 100 + Math.random() * 300,
+          };
+
+      // Auto-inject into matching parent container (use abs position for overlap check)
+      const allNodes = useCanvasStore.getState().nodes;
+      let parentId: string | undefined;
+      let parentType: string | undefined;
+      if (type === "page") parentType = "module";
+      else if (type === "field" || type === "action") parentType = "page";
+
+      if (parentType) {
+        const s = nodeDefaultSize(type, label);
+        for (const n of allNodes) {
+          if (n.type !== parentType) continue;
+          const nAbs = getNodeAbsPosition(n, allNodes);
+          const cw = Number(n.style?.width) || 160;
+          const ch = Number(n.style?.height) || 36;
+          const ox = Math.max(
+            0,
+            Math.min(pos.x + s.w, nAbs.x + cw) - Math.max(pos.x, nAbs.x),
+          );
+          const oy = Math.max(
+            0,
+            Math.min(pos.y + s.h, nAbs.y + ch) - Math.max(pos.y, nAbs.y),
+          );
+          if (ox > 0 && oy > 0) {
+            parentId = n.id;
+            // Convert to parent-relative position
+            pos.x = Math.round(pos.x - nAbs.x);
+            pos.y = Math.round(pos.y - nAbs.y);
+            break;
+          }
+        }
+      }
+
       const node: Node = {
         id: `new-${type}-${Date.now()}`,
         type,
-        position: { x: 200 + Math.random() * 400, y: 100 + Math.random() * 300 },
+        position: pos,
         data: { label },
+        parentId: parentId || undefined,
+        extent: parentId ? ("parent" as const) : undefined,
       };
 
       const apis: Record<string, string> = {
@@ -101,13 +154,28 @@ export function useNodeOperations(projectId: string) {
         action: "actions",
       };
 
+      // Backend stores absolute canvas coordinates (convertProjectToFlow expects absolute)
+      let backendPosX = pos.x;
+      let backendPosY = pos.y;
+      if (parentId) {
+        const pAbs = getNodeAbsPosition(
+          allNodes.find((n) => n.id === parentId)!,
+          allNodes,
+        );
+        backendPosX = pos.x + pAbs.x;
+        backendPosY = pos.y + pAbs.y;
+      }
+
+      const body: Record<string, any> = { name: label };
+      if (parentId) {
+        if (type === "page") body.moduleId = parentId;
+        else body.pageId = parentId;
+      }
+      body.posX = Math.round(backendPosX);
+      body.posY = Math.round(backendPosY);
       request(`/assets/${projectId}/${apis[type]}`, {
         method: "POST",
-        body: JSON.stringify({
-          name: label,
-          posX: node.position.x,
-          posY: node.position.y,
-        }),
+        body: JSON.stringify(body),
       }).catch(console.warn);
 
       setNodes((nds) => [...nds, node]);
@@ -130,8 +198,16 @@ export function useNodeOperations(projectId: string) {
         markerEnd: { type: MarkerType.ArrowClosed, color: "#555555" },
       };
       setEdges((eds) => [...eds, edge]);
+      request(`/edges/${projectId}`, {
+        method: "POST",
+        body: JSON.stringify({
+          sourceId: conn.source,
+          targetId: conn.target,
+          label: conn.sourceHandle || "",
+        }),
+      }).catch(console.warn);
     },
-    [setEdges],
+    [projectId, setEdges],
   );
 
   // Update label

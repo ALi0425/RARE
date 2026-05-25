@@ -43,9 +43,11 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
   const { deleteNodeById, createNewNode, onLabelSave } =
     useNodeOperations(projectId);
 
+  const [debugInfo, setDebugInfo] = useState("");
   useEffect(() => {
     resetInference();
-  }, [resetInference]);
+    setDebugInfo(`loadProject ready, nodes=${nodes.length}, edges=${edges.length}, loading=${loading}`);
+  }, [resetInference, nodes.length, edges.length, loading]);
 
   // ── Context menu ──
   const handleContextMenu = useCallback(
@@ -166,6 +168,11 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
 
       {/* Smart input bar */}
       <SmartInputBar projectId={projectId} />
+
+      {/* Debug overlay */}
+      <div style={{ position: "fixed", bottom: 60, right: 12, zIndex: 9999, background: "rgba(0,0,0,0.8)", color: "#0f0", fontSize: 11, padding: "6px 10px", borderRadius: 4, fontFamily: "monospace", maxWidth: 400, pointerEvents: "none" }}>
+        {debugInfo}
+      </div>
     </div>
   );
 }
