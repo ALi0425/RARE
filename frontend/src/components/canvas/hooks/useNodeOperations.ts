@@ -219,9 +219,26 @@ export function useNodeOperations(projectId: string) {
   const deleteEdgeById = useCallback(
     (edgeId: string) => {
       setEdges((eds) => eds.filter((e) => e.id !== edgeId));
-      // API call: for DB-backed edges (UUID) this works; for freshly created
-      // edges the frontend ID won't match the backend record — that's OK
       edgesApi.delete(projectId, edgeId).catch(console.warn);
+    },
+    [projectId, setEdges],
+  );
+
+  // Confirm AI-inferred edge (dashed → solid)
+  const confirmEdgeById = useCallback(
+    (edgeId: string) => {
+      setEdges((eds) =>
+        eds.map((e) => {
+          if (e.id !== edgeId) return e;
+          return {
+            ...e,
+            style: { stroke: "#555555", strokeWidth: 1.5 },
+            markerEnd: { type: "arrowclosed" as any, color: "#555555" },
+            data: { ...e.data, aiInferred: false },
+          };
+        }),
+      );
+      edgesApi.confirm(projectId, edgeId).catch(console.warn);
     },
     [projectId, setEdges],
   );
@@ -254,7 +271,7 @@ export function useNodeOperations(projectId: string) {
     [projectId, setNodes],
   );
 
-  return { deleteNodeById, deleteEdgeById, createNewNode, onConnect, onLabelSave };
+  return { deleteNodeById, deleteEdgeById, confirmEdgeById, createNewNode, onConnect, onLabelSave };
 }
 
 // ── Pure helpers used by multiple hooks ──

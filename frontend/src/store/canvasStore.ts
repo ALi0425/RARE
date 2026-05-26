@@ -241,14 +241,21 @@ export function convertProjectToFlow(
 
   // Edges
   for (const e of data.edges || []) {
+    const isInferred = e.status === "ai_inferred";
     fe.push({
       id: e.id,
       source: e.sourceId,
       target: e.targetId,
       label: e.label,
       type: "smoothstep",
-      style: { stroke: "#555555", strokeWidth: 1.5 },
-      markerEnd: { type: "arrowclosed" as any, color: "#555555" },
+      style: isInferred
+        ? { stroke: "#888888", strokeWidth: 1.5, strokeDasharray: "6 4" }
+        : { stroke: "#555555", strokeWidth: 1.5 },
+      markerEnd: {
+        type: "arrowclosed" as any,
+        color: isInferred ? "#888888" : "#555555",
+      },
+      data: isInferred ? { aiInferred: true, reason: e.sourceQuote || e.label || "" } : undefined,
     });
   }
 

@@ -22,6 +22,7 @@ const stageLabels: Record<string, string> = {
   analyzing: "AI 资产逆向解析",
   reasoning: "图谱推理",
   saving: "保存结果生成画布",
+  inferring: "AI 推理业务流程",
   complete: "分析完成",
 };
 

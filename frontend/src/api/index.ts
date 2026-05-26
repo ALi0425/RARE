@@ -44,6 +44,8 @@ export const edgesApi = {
   create: (pid: string, data: any) => request<any>(`/edges/${pid}`, { method: "POST", body: JSON.stringify(data) }),
   update: (pid: string, id: string, data: any) => request<any>(`/edges/${pid}/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   delete: (pid: string, id: string) => request<any>(`/edges/${pid}/${id}`, { method: "DELETE" }),
+  confirm: (pid: string, id: string) =>
+    request<any>(`/edges/${pid}/${id}`, { method: "PATCH", body: JSON.stringify({ status: "extracted" }) }),
 };
 
 export const parseApi = {

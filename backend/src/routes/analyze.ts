@@ -14,6 +14,7 @@ const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, "../../uploa
 
 const PARSER_URL = process.env.PARSER_URL || "http://localhost:8003";
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || "http://localhost:5678/webhook";
+const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3001";
 
 // ── POST /api/analyze/:projectId ──
 router.post(
@@ -164,8 +165,32 @@ router.post(
         },
       });
 
+      // ── Stage 5: Auto-trigger graph inference ──
+      send("inferring", 95, "AI 推理业务流程...");
+      try {
+        await fetch(`${BACKEND_URL}/api/infer/${projectId}`, {
+          method: "POST",
+          signal: AbortSignal.timeout(65000),
+        });
+      } catch (inferErr) {
+        console.warn("Auto-inference failed (non-fatal):", inferErr);
+      }
+
+      // Re-fetch after inference to include inferred edges
+      const fullWithInfer = await prisma.project.findUnique({
+        where: { id: projectId },
+        include: {
+          modules: { include: { pages: { include: { fields: true, actions: true } } }, orderBy: { createdAt: "asc" } },
+          pages: { where: { moduleId: null }, include: { fields: true, actions: true }, orderBy: { createdAt: "asc" } },
+          fields: { where: { pageId: null } },
+          actions: { where: { pageId: null } },
+          edges: true,
+          validations: true,
+        },
+      });
+
       send("complete", 100, "分析完成");
-      res.write(`data: ${JSON.stringify({ stage: "result", project: full })}\n\n`);
+      res.write(`data: ${JSON.stringify({ stage: "result", project: fullWithInfer })}\n\n`);
       res.end();
     } catch (err) {
       console.error("Analyze error:", err);

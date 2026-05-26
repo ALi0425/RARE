@@ -44,7 +44,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
   } | null>(null);
   const [editEdge, setEditEdge] = useState<any>(null);
 
-  const { deleteNodeById, deleteEdgeById, createNewNode, onLabelSave } =
+  const { deleteNodeById, deleteEdgeById, confirmEdgeById, createNewNode, onLabelSave } =
     useNodeOperations(projectId);
 
   useEffect(() => {
@@ -142,6 +142,7 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
                   onClose={() => setCtxMenu(null)}
                   onDelete={deleteNodeById}
                   onDeleteEdge={deleteEdgeById}
+                  onConfirmEdge={confirmEdgeById}
                   onCreate={createNewNode}
                 />
               )}
