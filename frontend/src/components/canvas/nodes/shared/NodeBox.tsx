@@ -115,113 +115,187 @@ interface NodeBoxProps {
   children?: ReactNode;
 }
 
+type EvalDisplay = "active" | "parent" | null;
+
+function getEvalDisplay(type: string, evalLevel?: string): EvalDisplay {
+  if (!evalLevel) return null;
+  if (type === evalLevel) return "active";
+  // action is same level as field
+  if (type === "action" && evalLevel === "field") return "active";
+  // Module is always a parent when not active
+  if (type === "module" && evalLevel !== "module") return "parent";
+  // Page is a parent only at field level
+  if (type === "page" && evalLevel === "field") return "parent";
+  return null;
+}
+
 export default function NodeBox({ id, data, type, children }: NodeBoxProps) {
   const m = nodeMeta[type] || nodeMeta.field;
   const isContainer = type === "module" || type === "page";
-  const isDiffGreen = data?.diffTooltip === undefined && false; // set by style override
   const diffTooltip = data?.diffTooltip as string | undefined;
 
-  return (
-    <div>
-      <div data-v3-check="true"
-        style={{
-          background: m.bg,
-          border: isContainer ? "none" : `1px solid ${m.accent}88`,
-          borderRadius: isContainer ? theme.radius.md : theme.radius.sm,
-          padding: isContainer ? "12px 16px" : "6px 12px",
-          width: "100%",
-          height: "100%",
-          boxSizing: "border-box",
-          position: "relative",
-          cursor: "grab",
-          fontFamily: theme.font,
-          color: theme.colors.text.primary,
-          boxShadow: isContainer ? "inset 0 0 0 1px rgba(255,255,255,0.03)" : undefined,
-        }}
-        title={diffTooltip}
-      >
-        {/* Handles */}
-        <Handle
-          type="target"
-          position={Position.Left}
-          style={{
-            background: m.accent,
-            width: 7,
-            height: 7,
-            border: "2px solid #1a1a1a",
-            borderRadius: "50%",
-          }}
-          id="left"
-        />
-        <Handle
-          type="source"
-          position={Position.Right}
-          style={{
-            background: m.accent,
-            width: 7,
-            height: 7,
-            border: "2px solid #1a1a1a",
-            borderRadius: "50%",
-          }}
-          id="right"
-        />
-        <Handle
-          type="target"
-          position={Position.Top}
-          style={{
-            background: m.accent,
-            width: 7,
-            height: 7,
-            border: "2px solid #1a1a1a",
-            borderRadius: "50%",
-          }}
-          id="top"
-        />
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          style={{
-            background: m.accent,
-            width: 7,
-            height: 7,
-            border: "2px solid #1a1a1a",
-            borderRadius: "50%",
-          }}
-          id="bottom"
-        />
+  // ── Evaluation mode ──
+  const evalZoom = data?.evalZoom as number | undefined;
+  const evalLevel = data?.evalLevel as string | undefined;
+  const evalDisplay = getEvalDisplay(type, evalLevel);
+  const isEval = evalDisplay !== null;
 
-        {/* Label chip + name inline — force single line */}
-        <div style={{ whiteSpace: "nowrap", marginBottom: isContainer ? 8 : 0 }}>
-          <span
-            style={{
-              display: "inline-block",
-              background: m.accent,
-              color: theme.colors.text.inverse,
-              fontSize: 9,
-              fontWeight: 600,
-              padding: "1px 6px",
-              borderRadius: 4,
-              lineHeight: "16px",
-              letterSpacing: 0.3,
-              opacity: 0.9,
-              verticalAlign: "middle",
-            }}
-          >
-            {m.label}
-          </span>
-          <span
-            style={{
-              verticalAlign: "middle",
-              marginLeft: 6,
-              display: "inline",
-            }}
-          >
-            <EditableLabel value={data?.label || ""} nodeId={id} />
-          </span>
-          <span style={{ fontSize: 8, color: "#ff0", verticalAlign: "middle" }}>v3</span>
-        </div>
-        {isContainer ? children : <div style={{ marginTop: 4 }}>{children}</div>}
-      </div>
+  // Compute font size based on display mode and zoom
+  let fontSize: number;
+  let fontWeight: number;
+  let textColor: string;
+  let isCentered = false;
+  let showChip = false;
+  let paddingX: number;
+  let paddingY: number;
+
+  if (isEval && evalDisplay === "active") {
+    // Active: card放大名称缩小 (inverse font scaling for constant screen size)
+    const z = Math.max(evalZoom || 0.4, 0.1);
+    if (type === "module") {
+      fontSize = Math.min(48, Math.max(20, Math.round(16 / z)));
+    } else if (type === "page") {
+      fontSize = Math.min(36, Math.max(14, Math.round(14 / z)));
+    } else {
+      // field / action
+      fontSize = Math.min(24, Math.max(10, Math.round(12 / z)));
+    }
+    fontWeight = 700;
+    textColor = m.accent;
+    isCentered = true;
+    paddingX = 20;
+    paddingY = 20;
+  } else if (isEval && evalDisplay === "parent") {
+    // Parent: name at top, fixed font size
+    fontSize = type === "module" ? 12 : 11;
+    fontWeight = 600;
+    textColor = theme.colors.text.secondary;
+    isCentered = false;
+    paddingX = 14;
+    paddingY = 10;
+  } else {
+    // Normal mode
+    fontSize = 12;
+    fontWeight = 500;
+    textColor = theme.colors.text.primary;
+    showChip = true;
+    paddingX = isContainer ? 16 : 12;
+    paddingY = isContainer ? 12 : 6;
+  }
+
+  return (
+    <div
+      style={{
+        background: isEval ? theme.colors.bg.surface : m.bg,
+        border: isEval
+          ? `1px solid ${m.accent}55`
+          : isContainer
+            ? "none"
+            : `1px solid ${m.accent}88`,
+        borderRadius: isEval ? theme.radius.md : isContainer ? theme.radius.md : theme.radius.sm,
+        padding: `${paddingY}px ${paddingX}px`,
+        width: "100%",
+        height: "100%",
+        boxSizing: "border-box",
+        position: "relative",
+        cursor: "grab",
+        fontFamily: theme.font,
+        color: theme.colors.text.primary,
+        boxShadow: isEval
+          ? `inset 0 0 0 1px ${m.accent}18`
+          : isContainer
+            ? "inset 0 0 0 1px rgba(255,255,255,0.03)"
+            : undefined,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: isCentered ? "center" : "flex-start",
+        alignItems: isCentered ? "center" : "stretch",
+      }}
+      title={diffTooltip}
+    >
+      {/* Handles (hidden in evaluation mode) */}
+      {!isEval && (
+        <>
+          <Handle type="target" position={Position.Left} style={{ background: m.accent, width: 7, height: 7, border: "2px solid #1a1a1a", borderRadius: "50%" }} id="left" />
+          <Handle type="source" position={Position.Right} style={{ background: m.accent, width: 7, height: 7, border: "2px solid #1a1a1a", borderRadius: "50%" }} id="right" />
+          <Handle type="target" position={Position.Top} style={{ background: m.accent, width: 7, height: 7, border: "2px solid #1a1a1a", borderRadius: "50%" }} id="top" />
+          <Handle type="source" position={Position.Bottom} style={{ background: m.accent, width: 7, height: 7, border: "2px solid #1a1a1a", borderRadius: "50%" }} id="bottom" />
+        </>
+      )}
+
+      {/* ── Active level: big centered name ── */}
+      {isEval && evalDisplay === "active" && (
+        <span
+          style={{
+            fontSize,
+            fontWeight,
+            color: textColor,
+            lineHeight: 1.2,
+            textAlign: "center",
+            wordBreak: "break-word",
+          }}
+        >
+          {data?.label || ""}
+        </span>
+      )}
+
+      {/* ── Parent level: name at top, single card ── */}
+      {isEval && evalDisplay === "parent" && (
+        <span
+          style={{
+            fontSize,
+            fontWeight,
+            color: textColor,
+            lineHeight: 1.3,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            textAlign: "left",
+          }}
+        >
+          {data?.label || ""}
+        </span>
+      )}
+
+      {/* ── Normal mode ── */}
+      {!isEval && (
+        <>
+          {/* Label chip + name inline */}
+          <div style={{ whiteSpace: "nowrap", marginBottom: isContainer ? 8 : 0 }}>
+            <span
+              style={{
+                display: "inline-block",
+                background: m.accent,
+                color: theme.colors.text.inverse,
+                fontSize: 9,
+                fontWeight: 600,
+                padding: "1px 6px",
+                borderRadius: 4,
+                lineHeight: "16px",
+                letterSpacing: 0.3,
+                opacity: 0.9,
+                verticalAlign: "middle",
+              }}
+            >
+              {m.label}
+            </span>
+            <span
+              style={{
+                verticalAlign: "middle",
+                marginLeft: 6,
+                display: "inline",
+              }}
+            >
+              <EditableLabel value={data?.label || ""} nodeId={id} />
+            </span>
+          </div>
+          {isContainer
+            ? children
+            : children && <div style={{ marginTop: 4 }}>{children}</div>}
+        </>
+      )}
+
+      {/* Diff tooltip */}
       {diffTooltip && (
         <div
           style={{

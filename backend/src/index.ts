@@ -8,6 +8,7 @@ import inferenceRoutes from "./routes/inference";
 import assetsLookupRoutes from "./routes/assets-lookup";
 import commitsRoutes from "./routes/commits";
 import analyzeRoutes from "./routes/analyze";
+import projectFilesRoutes from "./routes/project-files";
 
 const app = express();
 app.use(cors());
@@ -21,6 +22,7 @@ app.use("/api/inference", inferenceRoutes);
 app.use("/api/assets-lookup", assetsLookupRoutes);
 app.use("/api/commits", commitsRoutes);
 app.use("/api/analyze", analyzeRoutes);
+app.use("/api/project-files", projectFilesRoutes);
 
 const PORT = parseInt(process.env.PORT || "3001", 10);
 app.listen(PORT, () => {

@@ -5,8 +5,10 @@ interface Props {
   y: number;
   nodeId?: string;
   nodeType?: string;
+  edgeId?: string;
   onClose: () => void;
   onDelete: (id: string) => void;
+  onDeleteEdge?: (id: string) => void;
   onCreate: (type: string) => void;
 }
 
@@ -36,8 +38,10 @@ export default function ContextMenu({
   x,
   y,
   nodeId,
+  edgeId,
   onClose,
   onDelete,
+  onDeleteEdge,
   onCreate,
 }: Props) {
   return (
@@ -61,7 +65,32 @@ export default function ContextMenu({
           gap: 2,
         }}
       >
-        {nodeId ? (
+        {edgeId ? (
+          <>
+            <span
+              style={{
+                padding: "4px 14px",
+                fontSize: 11,
+                color: theme.colors.text.tertiary,
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+              }}
+            >
+              连线操作
+            </span>
+            <button
+              style={{ ...menuBtn, color: theme.colors.accent.red }}
+              onClick={() => {
+                onDeleteEdge?.(edgeId);
+                onClose();
+              }}
+              onMouseOver={(e) => (e.currentTarget.style.background = theme.colors.bg.hover)}
+              onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
+            >
+              删除此连线
+            </button>
+          </>
+        ) : nodeId ? (
           <>
             <span
               style={{

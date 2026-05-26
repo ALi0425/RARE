@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import type { Node, Edge, Connection } from "@xyflow/react";
 import { MarkerType } from "@xyflow/react";
 import { request } from "../../../api/client";
+import { edgesApi } from "../../../api";
 import { useCanvasStore } from "../../../store/canvasStore";
 
 function nodeDefaultSize(type?: string, label = "") {
@@ -214,6 +215,17 @@ export function useNodeOperations(projectId: string) {
     [projectId, setEdges],
   );
 
+  // Delete edge
+  const deleteEdgeById = useCallback(
+    (edgeId: string) => {
+      setEdges((eds) => eds.filter((e) => e.id !== edgeId));
+      // API call: for DB-backed edges (UUID) this works; for freshly created
+      // edges the frontend ID won't match the backend record — that's OK
+      edgesApi.delete(projectId, edgeId).catch(console.warn);
+    },
+    [projectId, setEdges],
+  );
+
   // Update label
   const onLabelSave = useCallback(
     (nodeId: string, label: string) => {
@@ -242,7 +254,7 @@ export function useNodeOperations(projectId: string) {
     [projectId, setNodes],
   );
 
-  return { deleteNodeById, createNewNode, onConnect, onLabelSave };
+  return { deleteNodeById, deleteEdgeById, createNewNode, onConnect, onLabelSave };
 }
 
 // ── Pure helpers used by multiple hooks ──

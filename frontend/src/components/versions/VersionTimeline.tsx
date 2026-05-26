@@ -7,12 +7,14 @@ interface Props {
   projectId: string;
   onRestore?: (version: number) => void;
   onClose?: () => void;
+  fullPage?: boolean;
 }
 
 export default function VersionTimeline({
   projectId,
   onRestore,
   onClose,
+  fullPage,
 }: Props) {
   const { commits, loading, previewVersion, enterPreview, exitPreview } =
     useVersions(projectId);
@@ -20,7 +22,7 @@ export default function VersionTimeline({
   return (
     <div
       style={{
-        width: 260,
+        width: fullPage ? "100%" : 260,
         background: theme.colors.bg.surface,
         borderLeft: `1px solid ${theme.colors.border.subtle}`,
         display: "flex",

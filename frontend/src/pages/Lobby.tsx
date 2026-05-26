@@ -11,6 +11,7 @@ export default function Lobby({ onOpenProject }: Props) {
   const [projects, setProjects] = useState<any[]>([]);
   const [showNew, setShowNew] = useState(false);
   const [selectedProject, setSelectedProject] = useState<{ id: string; name: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try { setProjects((await projectsApi.list()) || []); } catch (e) { console.error(e); }
@@ -21,6 +22,18 @@ export default function Lobby({ onOpenProject }: Props) {
     await projectsApi.create({ name });
     await load();
   }, [load]);
+
+  const handleDelete = useCallback(async (id: string) => {
+    try {
+      await projectsApi.delete(id);
+      await load();
+    } catch (e) {
+      console.error("Delete failed:", e);
+    }
+    setDeleteConfirm(null);
+  }, [load]);
+
+  const deletingProject = deleteConfirm ? projects.find((p) => p.id === deleteConfirm) : null;
 
   return (
     <div
@@ -93,9 +106,17 @@ export default function Lobby({ onOpenProject }: Props) {
         projects={projects}
         onOpenProject={(id) => {
           const p = projects.find((x) => x.id === id);
-          setSelectedProject(p ? { id: p.id, name: p.name } : { id, name: "" });
+          if (!p) return;
+          const c = p._count || {};
+          const total = (c.modules || 0) + (c.pages || 0) + (c.fields || 0) + (c.actions || 0);
+          if (total === 0) {
+            setSelectedProject({ id: p.id, name: p.name });
+          } else {
+            onOpenProject(id);
+          }
         }}
         onCreateClick={() => setShowNew(true)}
+        onDeleteProject={(id) => setDeleteConfirm(id)}
       />
 
       {/* Create modal */}
@@ -118,6 +139,92 @@ export default function Lobby({ onOpenProject }: Props) {
           }}
           onClose={() => setSelectedProject(null)}
         />
+      )}
+
+      {/* Delete confirmation */}
+      {deleteConfirm && deletingProject && (
+        <>
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: theme.colors.bg.overlay,
+              zIndex: 999,
+            }}
+            onClick={() => setDeleteConfirm(null)}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              zIndex: 1000,
+              width: 360,
+              borderRadius: theme.radius.lg,
+              background: theme.colors.bg.surface,
+              border: `1px solid ${theme.colors.border.primary}`,
+              boxShadow: theme.shadow.lg,
+              padding: 28,
+              textAlign: "center",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 16,
+                fontWeight: 600,
+                color: theme.colors.text.primary,
+                marginBottom: 12,
+              }}
+            >
+              确认删除
+            </div>
+            <div
+              style={{
+                fontSize: 13,
+                color: theme.colors.text.secondary,
+                marginBottom: 24,
+                lineHeight: 1.5,
+              }}
+            >
+              确定要删除项目「{deletingProject.name}」吗？<br />
+              此操作不可撤销，所有数据将永久删除。
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                style={{
+                  padding: "8px 24px",
+                  background: "transparent",
+                  border: `1px solid ${theme.colors.border.primary}`,
+                  borderRadius: 20,
+                  color: theme.colors.text.secondary,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  fontFamily: theme.font,
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={() => handleDelete(deleteConfirm)}
+                style={{
+                  padding: "8px 24px",
+                  background: theme.colors.accent.red,
+                  border: "none",
+                  borderRadius: 20,
+                  color: "#fff",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  fontFamily: theme.font,
+                }}
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

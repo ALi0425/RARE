@@ -20,6 +20,7 @@ import { theme } from "../../theme/tokens";
 interface Props {
   projectId: string;
   onContextMenu: (e: React.MouseEvent, nodeId?: string, nodeType?: string) => void;
+  onEdgeContextMenu?: (e: React.MouseEvent, edgeId: string) => void;
   onEdgeDoubleClick: (edge: any) => void;
   onLabelSave: (nodeId: string, label: string) => void;
 }
@@ -35,6 +36,7 @@ export default function CanvasCore(props: Props) {
 function CanvasCoreInner({
   projectId,
   onContextMenu,
+  onEdgeContextMenu,
   onEdgeDoubleClick,
   onLabelSave,
 }: Props) {
@@ -118,6 +120,10 @@ function CanvasCoreInner({
         onEdgeDoubleClick={(e, edge) => {
           e.preventDefault();
           onEdgeDoubleClick(edge);
+        }}
+        onEdgeContextMenu={(e, edge) => {
+          e.preventDefault();
+          onEdgeContextMenu?.(e, edge.id);
         }}
         onMoveEnd={updateViewportCenter}
         onDragOver={onDragOver}

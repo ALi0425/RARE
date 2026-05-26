@@ -1,5 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
+import path from "path";
+import fs from "fs";
 import prisma from "../lib/prisma";
 
 const router = Router();
@@ -7,6 +9,8 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
 });
+
+const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, "../../uploads");
 
 const PARSER_URL = process.env.PARSER_URL || "http://localhost:8003";
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || "http://localhost:5678/webhook";
@@ -43,6 +47,27 @@ router.post(
           send("parsing", 10 + Math.round((i / files.length) * 20), `解析文件 ${i + 1}/${files.length}: ${f.originalname}`);
           const extracted = await extractFileText(f);
           if (extracted) allText += `\n\n--- ${f.originalname} ---\n${extracted}`;
+
+          // Save file to disk for asset management
+          try {
+            const projectDir = path.join(UPLOADS_DIR, projectId);
+            fs.mkdirSync(projectDir, { recursive: true });
+            const safeName = `${Date.now()}-${f.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+            const filePath = path.join(projectDir, safeName);
+            fs.writeFileSync(filePath, f.buffer);
+            await prisma.projectFile.create({
+              data: {
+                projectId,
+                fileName: safeName,
+                originalName: f.originalname,
+                mimeType: f.mimetype,
+                fileSize: f.buffer.length,
+                storagePath: filePath,
+              },
+            });
+          } catch (saveErr) {
+            console.warn("Failed to save uploaded file:", saveErr);
+          }
         }
       }
       if (!allText.trim()) { send("error", 0, "没有可分析的内容"); res.end(); return; }

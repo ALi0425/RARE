@@ -4,6 +4,9 @@ import { useInferenceStore } from "../store/inferenceStore";
 import { theme } from "../theme/tokens";
 import CanvasHeader from "../components/canvas/CanvasHeader";
 import CanvasCore from "../components/canvas/CanvasCore";
+import CanvasSideMenu from "../components/canvas/CanvasSideMenu";
+import AssetManager from "../components/canvas/AssetManager";
+import SmartEvaluation from "../components/canvas/SmartEvaluation";
 import ContextMenu from "../components/canvas/menus/ContextMenu";
 import EdgeEditDialog from "../components/canvas/menus/EdgeEditDialog";
 import { useNodeOperations } from "../components/canvas/hooks/useNodeOperations";
@@ -18,28 +21,30 @@ interface Props {
   onBack: () => void;
 }
 
+type Page = "review" | "assets" | "evaluate" | "versions";
+
 export default function ProjectCanvas({ projectId, onBack }: Props) {
   const loading = useCanvasStore((s) => s.loading);
   const error = useCanvasStore((s) => s.error);
   const projectName = useCanvasStore((s) => s.projectName);
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
-  const loadProject = useCanvasStore((s) => s.loadProject);
 
   const inferenceProcessing = useInferenceStore((s) => s.isProcessing);
   const resetInference = useInferenceStore((s) => s.resetInference);
 
-  const [showTimeline, setShowTimeline] = useState(false);
+  const [activePage, setActivePage] = useState<Page>("review");
 
   // Menus
   const [ctxMenu, setCtxMenu] = useState<{
     x: number;
     y: number;
     nodeId?: string;
+    edgeId?: string;
   } | null>(null);
   const [editEdge, setEditEdge] = useState<any>(null);
 
-  const { deleteNodeById, createNewNode, onLabelSave } =
+  const { deleteNodeById, deleteEdgeById, createNewNode, onLabelSave } =
     useNodeOperations(projectId);
 
   useEffect(() => {
@@ -50,6 +55,13 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, nodeId?: string) => {
       setCtxMenu({ x: e.clientX, y: e.clientY, nodeId });
+    },
+    [],
+  );
+
+  const handleEdgeContextMenu = useCallback(
+    (e: React.MouseEvent, edgeId: string) => {
+      setCtxMenu({ x: e.clientX, y: e.clientY, edgeId });
     },
     [],
   );
@@ -82,7 +94,6 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         display: "flex",
         flexDirection: "column",
         background: theme.colors.bg.app,
-        position: "relative",
       }}
     >
       {/* Header */}
@@ -95,75 +106,75 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
         error={error || undefined}
       />
 
-      {/* Canvas + Timeline */}
-      <div style={{ flex: 1, position: "relative", display: "flex", overflow: "hidden" }}>
-        <div style={{ flex: 1, position: "relative" }}>
-          <CanvasCore
-            projectId={projectId}
-            onContextMenu={handleContextMenu}
-            onEdgeDoubleClick={setEditEdge}
-            onLabelSave={onLabelSave}
-          />
+      {/* Body: sidebar + content */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {/* Persistent sidebar */}
+        <CanvasSideMenu
+          activeItem={activePage}
+          onSelect={(id) => setActivePage(id as Page)}
+        />
 
-          {/* Version toggle button */}
-          <button
-            onClick={() => setShowTimeline((v) => !v)}
-            title={showTimeline ? "关闭版本历史" : "版本历史"}
-            style={{
-              position: "absolute",
-              top: 12,
-              right: showTimeline ? 270 : 12,
-              zIndex: 20,
-              padding: "6px 10px",
-              background: theme.colors.bg.surface,
-              border: `1px solid ${theme.colors.border.subtle}`,
-              borderRadius: theme.radius.sm,
-              color: theme.colors.text.secondary,
-              fontSize: 12,
-              cursor: "pointer",
-              fontFamily: theme.font,
-              transition: `right ${theme.transition}`,
-            }}
-          >
-            {showTimeline ? "✕" : "⏱"}
-          </button>
+        {/* Content area */}
+        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+          {/* ── Page: Review Canvas ── */}
+          {activePage === "review" && (
+            <>
+              <CanvasCore
+                projectId={projectId}
+                onContextMenu={handleContextMenu}
+                onEdgeContextMenu={handleEdgeContextMenu}
+                onEdgeDoubleClick={setEditEdge}
+                onLabelSave={onLabelSave}
+              />
 
-          {/* Inference overlays */}
-          <InferenceOutput />
-          <CanvasDiffOverlay />
-          <DecisionPanel projectId={projectId} />
+              {/* Inference overlays */}
+              <InferenceOutput />
+              <CanvasDiffOverlay />
+              <DecisionPanel projectId={projectId} />
 
-          {/* Context menu */}
-          {ctxMenu && (
-            <ContextMenu
-              x={ctxMenu.x}
-              y={ctxMenu.y}
-              nodeId={ctxMenu.nodeId}
-              onClose={() => setCtxMenu(null)}
-              onDelete={deleteNodeById}
-              onCreate={createNewNode}
-            />
+              {/* Context menu */}
+              {ctxMenu && (
+                <ContextMenu
+                  x={ctxMenu.x}
+                  y={ctxMenu.y}
+                  nodeId={ctxMenu.nodeId}
+                  edgeId={ctxMenu.edgeId}
+                  onClose={() => setCtxMenu(null)}
+                  onDelete={deleteNodeById}
+                  onDeleteEdge={deleteEdgeById}
+                  onCreate={createNewNode}
+                />
+              )}
+
+              {/* Edge edit dialog */}
+              {editEdge && (
+                <EdgeEditDialog
+                  edge={editEdge}
+                  projectId={projectId}
+                  onClose={() => setEditEdge(null)}
+                />
+              )}
+            </>
           )}
 
-          {/* Edge edit dialog */}
-          {editEdge && (
-            <EdgeEditDialog
-              edge={editEdge}
-              projectId={projectId}
-              onClose={() => setEditEdge(null)}
-            />
+          {/* ── Page: Asset Management ── */}
+          {activePage === "assets" && (
+            <AssetManager projectId={projectId} />
+          )}
+
+          {/* ── Page: Smart Evaluation ── */}
+          {activePage === "evaluate" && (
+            <SmartEvaluation projectId={projectId} />
+          )}
+
+          {/* ── Page: Version Management ── */}
+          {activePage === "versions" && (
+            <div style={{ width: "100%", height: "100%", maxWidth: 500 }}>
+              <VersionTimeline projectId={projectId} fullPage />
+            </div>
           )}
         </div>
-
-        {/* Version history — right side */}
-        {showTimeline && (
-          <VersionTimeline
-            projectId={projectId}
-            onClose={() => setShowTimeline(false)}
-          />
-        )}
       </div>
-
     </div>
   );
 }

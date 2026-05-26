@@ -12,12 +12,14 @@ interface Props {
   }>;
   onOpenProject: (id: string) => void;
   onCreateClick: () => void;
+  onDeleteProject?: (id: string) => void;
 }
 
 export default function ProjectGrid({
   projects,
   onOpenProject,
   onCreateClick,
+  onDeleteProject,
 }: Props) {
   return (
     <div
@@ -34,6 +36,7 @@ export default function ProjectGrid({
           key={p.id}
           project={p}
           onClick={() => onOpenProject(p.id)}
+          onDelete={onDeleteProject}
         />
       ))}
     </div>

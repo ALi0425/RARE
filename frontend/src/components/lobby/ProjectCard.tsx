@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { theme } from "../../theme/tokens";
 
 interface Props {
@@ -9,35 +10,62 @@ interface Props {
     _count?: { modules: number; pages: number; fields: number; actions: number };
   };
   onClick: () => void;
+  onDelete?: (id: string) => void;
 }
 
-export default function ProjectCard({ project, onClick }: Props) {
+export default function ProjectCard({ project, onClick, onDelete }: Props) {
+  const [hover, setHover] = useState(false);
   const count = project._count;
 
   return (
     <div
       onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
         padding: 20,
         borderRadius: theme.radius.md,
-        background: theme.colors.bg.surface,
-        border: `1px solid ${theme.colors.border.subtle}`,
+        background: hover ? theme.colors.bg.elevated : theme.colors.bg.surface,
+        border: `1px solid ${hover ? theme.colors.border.primary : theme.colors.border.subtle}`,
         cursor: "pointer",
         display: "flex",
         flexDirection: "column",
         gap: 14,
         minHeight: 180,
         transition: `all ${theme.transition}`,
-      }}
-      onMouseOver={(e) => {
-        e.currentTarget.style.borderColor = theme.colors.border.primary;
-        e.currentTarget.style.background = theme.colors.bg.elevated;
-      }}
-      onMouseOut={(e) => {
-        e.currentTarget.style.borderColor = theme.colors.border.subtle;
-        e.currentTarget.style.background = theme.colors.bg.surface;
+        position: "relative",
       }}
     >
+      {/* Delete button — top right */}
+      {onDelete && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(project.id);
+          }}
+          title="删除项目"
+          style={{
+            position: "absolute",
+            top: 10,
+            right: 10,
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            border: "none",
+            background: hover ? `${theme.colors.accent.red}20` : "transparent",
+            color: hover ? theme.colors.accent.red : theme.colors.text.tertiary,
+            cursor: "pointer",
+            fontSize: 14,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: `all ${theme.transition}`,
+          }}
+        >
+          ✕
+        </button>
+      )}
+
       <div
         style={{
           width: 42,
