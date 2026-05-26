@@ -15,6 +15,8 @@ import InferenceOutput from "../components/inference/InferenceOutput";
 import CanvasDiffOverlay from "../components/inference/CanvasDiffOverlay";
 import DecisionPanel from "../components/inference/DecisionPanel";
 import VersionTimeline from "../components/versions/VersionTimeline";
+import ConfirmDialog from "../components/canvas/ConfirmDialog";
+import { positionsApi } from "../api";
 
 interface Props {
   projectId: string;
@@ -32,8 +34,13 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
 
   const inferenceProcessing = useInferenceStore((s) => s.isProcessing);
   const resetInference = useInferenceStore((s) => s.resetInference);
+  const confirmedAt = useCanvasStore((s) => s.confirmedAt);
+  const collectPositions = useCanvasStore((s) => s.collectPositions);
+  const loadProject = useCanvasStore((s) => s.loadProject);
 
   const [activePage, setActivePage] = useState<Page>("review");
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   // Menus
   const [ctxMenu, setCtxMenu] = useState<{
@@ -65,6 +72,25 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
     },
     [],
   );
+
+  // ── Save & Confirm handlers ──
+  const handleSave = async () => {
+    try {
+      const positions = collectPositions();
+      await positionsApi.saveAll(projectId, positions);
+      setToast("保存成功");
+    } catch (e) {
+      console.error("save error:", e);
+      setToast(`保存失败: ${e instanceof Error ? e.message : "未知错误"}`);
+    }
+    setTimeout(() => setToast(null), 2000);
+  };
+
+  const handleConfirmComplete = (project: any) => {
+    setShowConfirm(false);
+    loadProject(projectId);
+    setActivePage("evaluate");
+  };
 
   // ── Loading state ──
   if (loading) {
@@ -176,6 +202,68 @@ export default function ProjectCanvas({ projectId, onBack }: Props) {
           )}
         </div>
       </div>
+
+      {/* Bottom save/confirm bar */}
+      {confirmedAt === null && activePage === "review" && (
+        <div
+          style={{
+            position: "fixed", bottom: 0, left: 0, right: 0,
+            display: "flex", justifyContent: "center", alignItems: "center",
+            padding: "16px 0", gap: 12,
+            background: "linear-gradient(transparent, rgba(0,0,0,0.5))",
+            zIndex: 100, pointerEvents: "none",
+          }}
+        >
+          <div style={{ display: "flex", gap: 12, pointerEvents: "auto" }}>
+            <button
+              onClick={handleSave}
+              style={{
+                padding: "8px 24px", borderRadius: theme.radius.sm,
+                border: `1px solid ${theme.colors.border.subtle}`,
+                background: theme.colors.bg.surface,
+                color: theme.colors.text.primary,
+                cursor: "pointer", fontSize: 13, fontWeight: 600,
+              }}
+            >
+              💾 保存
+            </button>
+            <button
+              onClick={() => setShowConfirm(true)}
+              style={{
+                padding: "8px 24px", borderRadius: theme.radius.sm, border: "none",
+                background: theme.colors.accent.page, color: "#fff",
+                cursor: "pointer", fontSize: 13, fontWeight: 600,
+              }}
+            >
+              ✅ 确认
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)",
+            background: theme.colors.bg.surface, color: theme.colors.text.primary,
+            padding: "8px 20px", borderRadius: theme.radius.sm,
+            boxShadow: theme.shadow.md, zIndex: 1001, fontSize: 13,
+          }}
+        >
+          {toast}
+        </div>
+      )}
+
+      {/* Confirm dialog */}
+      {showConfirm && (
+        <ConfirmDialog
+          projectId={projectId}
+          positions={collectPositions()}
+          onComplete={handleConfirmComplete}
+          onCancel={() => setShowConfirm(false)}
+        />
+      )}
     </div>
   );
 }

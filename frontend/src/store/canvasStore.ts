@@ -21,6 +21,7 @@ export interface DiffState {
 export interface ProjectData {
   id: string;
   name: string;
+  description?: string;
   modules: any[];
   pages: any[];
   fields: any[];
@@ -33,6 +34,8 @@ export interface ProjectData {
 interface CanvasStore {
   projectId: string | null;
   projectName: string;
+  confirmedAt: string | null;
+  confirmedSummary: string;
   nodes: Node[];
   edges: Edge[];
   loading: boolean;
@@ -52,6 +55,7 @@ interface CanvasStore {
   applyDiff: (diff: DiffState) => void;
   clearDiff: () => void;
   reset: () => void;
+  collectPositions: () => { modules: any[]; pages: any[]; fields: any[]; actions: any[] };
 }
 
 // ── Helpers ──
@@ -284,6 +288,8 @@ function edgesEqual(a: Edge[], b: Edge[]) {
 export const useCanvasStore = create<CanvasStore>((set, get) => ({
   projectId: null,
   projectName: "",
+  confirmedAt: null,
+  confirmedSummary: "",
   nodes: [],
   edges: [],
   loading: false,
@@ -336,6 +342,8 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       set((state) => ({
         projectId: id,
         projectName: data.name,
+        confirmedAt: (data as any).confirmedAt || null,
+        confirmedSummary: (data as any).description || "",
         nodes,
         edges,
         loading: false,
@@ -388,10 +396,33 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       edges: [],
       projectId: null,
       projectName: "",
+      confirmedAt: null,
+      confirmedSummary: "",
       loading: false,
       error: null,
       diffState: null,
       loadKey: 0,
       viewportCenter: null,
     }),
+
+  collectPositions: () => {
+    const { nodes } = get();
+    const modules: any[] = [];
+    const pages: any[] = [];
+    const fields: any[] = [];
+    const actions: any[] = [];
+
+    for (const n of nodes) {
+      if (n.type === "module") {
+        modules.push({ id: n.id, posX: n.position.x, posY: n.position.y });
+      } else if (n.type === "page") {
+        pages.push({ id: n.id, posX: n.position.x, posY: n.position.y });
+      } else if (n.type === "field") {
+        fields.push({ id: n.id, posX: n.position.x, posY: n.position.y });
+      } else if (n.type === "action") {
+        actions.push({ id: n.id, posX: n.position.x, posY: n.position.y });
+      }
+    }
+    return { modules, pages, fields, actions };
+  },
 }));

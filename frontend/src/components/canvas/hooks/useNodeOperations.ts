@@ -85,7 +85,7 @@ export function useNodeOperations(projectId: string) {
 
   // Create new node
   const createNewNode = useCallback(
-    (type: string, customName?: string) => {
+    async (type: string, customName?: string) => {
       const label =
         customName ||
         (type === "module"
@@ -140,18 +140,6 @@ export function useNodeOperations(projectId: string) {
         }
       }
 
-      const node: Node = {
-        id: `new-${type}-${Date.now()}`,
-        type,
-        position: pos,
-        data: { label },
-        parentId: parentId || undefined,
-        extent: parentId ? ("parent" as const) : undefined,
-        style: (type === "module" || type === "page")
-          ? { border: type === "module" ? "1px solid #5e6ad2" : "1px solid #34d399", borderRadius: 10, boxSizing: "border-box" as const }
-          : undefined,
-      };
-
       const apis: Record<string, string> = {
         module: "modules",
         page: "pages",
@@ -159,7 +147,7 @@ export function useNodeOperations(projectId: string) {
         action: "actions",
       };
 
-      // Backend stores absolute canvas coordinates (convertProjectToFlow expects absolute)
+      // Backend stores absolute canvas coordinates
       let backendPosX = pos.x;
       let backendPosY = pos.y;
       if (parentId) {
@@ -178,12 +166,31 @@ export function useNodeOperations(projectId: string) {
       }
       body.posX = Math.round(backendPosX);
       body.posY = Math.round(backendPosY);
-      request(`/assets/${projectId}/${apis[type]}`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }).catch(console.warn);
 
-      setNodes((nds) => [...nds, node]);
+      // First create in DB, then use the real ID
+      try {
+        const created = await request<any>(`/assets/${projectId}/${apis[type]}`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        const realId = created.id;
+
+        const node: Node = {
+          id: realId,
+          type,
+          position: pos,
+          data: { label },
+          parentId: parentId || undefined,
+          extent: parentId ? ("parent" as const) : undefined,
+          style: (type === "module" || type === "page")
+            ? { border: type === "module" ? "1px solid #5e6ad2" : "1px solid #34d399", borderRadius: 10, boxSizing: "border-box" as const }
+            : undefined,
+        };
+
+        setNodes((nds) => [...nds, node]);
+      } catch (err) {
+        console.error("create node failed:", err);
+      }
     },
     [projectId, setNodes],
   );

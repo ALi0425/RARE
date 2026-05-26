@@ -10,6 +10,7 @@ import commitsRoutes from "./routes/commits";
 import analyzeRoutes from "./routes/analyze";
 import inferRoutes from "./routes/infer";
 import projectFilesRoutes from "./routes/project-files";
+import confirmRoutes from "./routes/confirm";
 
 const app = express();
 app.use(cors());
@@ -25,6 +26,14 @@ app.use("/api/commits", commitsRoutes);
 app.use("/api/analyze", analyzeRoutes);
 app.use("/api/infer", inferRoutes);
 app.use("/api/project-files", projectFilesRoutes);
+app.use("/api/confirm", confirmRoutes);
+
+// Global error handler — prevents unhandled route errors from crashing the server
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("Unhandled error:", err);
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({ error: err.message || "Internal server error" });
+});
 
 const PORT = parseInt(process.env.PORT || "3001", 10);
 app.listen(PORT, () => {

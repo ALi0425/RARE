@@ -37,12 +37,15 @@ function SmartEvaluationInner() {
   const allNodes = useCanvasStore((s) => s.nodes);
   const allEdges = useCanvasStore((s) => s.edges);
   const loading = useCanvasStore((s) => s.loading);
+  const confirmedAt = useCanvasStore((s) => s.confirmedAt);
+  const confirmedSummary = useCanvasStore((s) => s.confirmedSummary);
   const rf = useReactFlow();
 
   const [level, setLevel] = useState<ZoomLevel>("module");
   const levelRef = useRef<ZoomLevel>("module");
   const [currentZoom, setCurrentZoom] = useState(0.4);
   const zoomRef = useRef(0.4);
+  const [showSummaryBanner, setShowSummaryBanner] = useState(true);
 
   // Track zoom and update level
   const onMove = useCallback((_: any, viewport: Viewport) => {
@@ -212,6 +215,35 @@ function SmartEvaluationInner() {
 
         </div>
       </div>
+
+      {/* Summary banner */}
+      {confirmedAt && showSummaryBanner && confirmedSummary && (
+        <div
+          style={{
+            display: "flex", alignItems: "flex-start", gap: 8,
+            padding: "10px 16px",
+            background: theme.colors.bg.surface,
+            borderBottom: `1px solid ${theme.colors.border.subtle}`,
+            fontSize: 12, color: theme.colors.text.secondary, lineHeight: 1.6,
+          }}
+        >
+          <span style={{ fontWeight: 600, whiteSpace: "nowrap", color: theme.colors.text.primary }}>
+            项目总结:
+          </span>
+          <div style={{ flex: 1, maxHeight: 72, overflow: "auto", whiteSpace: "pre-wrap" }}>
+            {confirmedSummary}
+          </div>
+          <button
+            onClick={() => setShowSummaryBanner(false)}
+            style={{
+              background: "none", border: "none", color: theme.colors.text.tertiary,
+              cursor: "pointer", fontSize: 14, padding: "0 4px", lineHeight: 1,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Canvas */}
       <div style={{ flex: 1, position: "relative" }}>

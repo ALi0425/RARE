@@ -52,3 +52,17 @@ export const parseApi = {
   parse: (projectId: string, text: string) =>
     request<any>(`/parse/${projectId}`, { method: "POST", body: JSON.stringify({ text }) }),
 };
+
+export const positionsApi = {
+  saveAll: (pid: string, entities: { modules: any[]; pages: any[]; fields: any[]; actions: any[] }) =>
+    request<any>(`/edges/${pid}/save-positions`, { method: "POST", body: JSON.stringify({ entities }) }),
+};
+
+export const confirmApi = {
+  start: (pid: string, entities: { modules: any[]; pages: any[]; fields: any[]; actions: any[] }): Promise<Response> =>
+    fetch(`${BASE}/confirm/${pid}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entities }),
+    }),
+};

@@ -12,6 +12,7 @@ model Project {
   name      String
   description String?
   status    String   @default("active")
+  confirmedAt DateTime? @map("confirmed_at")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
