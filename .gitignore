@@ -5,3 +5,7 @@ dist/
 .DS_Store
 .hermes/
 .claude/
+uploads/
+*.db
+*.db-shm
+*.db-wal

@@ -32,7 +32,7 @@ function formatTime(iso: string): string {
   });
 }
 
-const previewMimeTypes = ["text/plain", "text/markdown", "application/pdf"];
+const previewMimeTypes = ["text/plain", "text/markdown"];
 
 export default function AssetManager({ projectId }: Props) {
   const [files, setFiles] = useState<ProjectFile[]>([]);

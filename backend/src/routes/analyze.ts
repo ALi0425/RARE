@@ -44,22 +44,22 @@ router.post(
       if (files.length > 0) {
         for (let i = 0; i < files.length; i++) {
           const f = files[i];
-          send("parsing", 10 + Math.round((i / files.length) * 20), `解析文件 ${i + 1}/${files.length}: ${f.originalname}`);
-          const extracted = await extractFileText(f);
-          if (extracted) allText += `\n\n--- ${f.originalname} ---\n${extracted}`;
+          // Fix UTF-8 filename decoded as Latin-1 by multer
+          const originalName = Buffer.from(f.originalname, "latin1").toString("utf-8");
+          send("parsing", 10 + Math.round((i / files.length) * 20), `保存文件 ${i + 1}/${files.length}: ${originalName}`);
 
           // Save file to disk for asset management
           try {
             const projectDir = path.join(UPLOADS_DIR, projectId);
             fs.mkdirSync(projectDir, { recursive: true });
-            const safeName = `${Date.now()}-${f.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+            const safeName = `${Date.now()}-${originalName.replace(/[/\\:*?"<>|\0]/g, "_")}`;
             const filePath = path.join(projectDir, safeName);
             fs.writeFileSync(filePath, f.buffer);
             await prisma.projectFile.create({
               data: {
                 projectId,
                 fileName: safeName,
-                originalName: f.originalname,
+                originalName,
                 mimeType: f.mimetype,
                 fileSize: f.buffer.length,
                 storagePath: filePath,
@@ -70,11 +70,11 @@ router.post(
           }
         }
       }
-      if (!allText.trim()) { send("error", 0, "没有可分析的内容"); res.end(); return; }
+      if (!allText.trim() && files.length === 0) { send("error", 0, "没有可分析的内容"); res.end(); return; }
 
       // ── Stage 2: Parse (via n8n workflow + regex) ──
       send("analyzing", 35, "解析需求中...");
-      const result = await parseWithFallback(allText);
+      const result = await parseWithFallback(allText, files);
 
       // ── Stage 3: Graph reasoning (rule-based for now) ──
       send("reasoning", 60, "推理业务流程...");
@@ -181,10 +181,10 @@ interface PageItem { name: string; fields: Array<{ name: string; fieldType?: str
 interface ModuleItem { name: string; pages: PageItem[] }
 interface ParseResult { modules: ModuleItem[] }
 
-async function parseWithFallback(text: string): Promise<ParseResult> {
+async function parseWithFallback(text: string, files?: Express.Multer.File[]): Promise<ParseResult> {
   // Try asset-ingestion webhook (n8n → Ollama → structured JSON)
   try {
-    const result = await callAssetIngestion(text);
+    const result = await callAssetIngestion(text, files);
     if (result && result.modules && result.modules.length > 0) {
       return convertFromAssetResult(result);
     }
@@ -209,15 +209,51 @@ interface AssetResponse {
   modules: AssetModule[];
 }
 
-async function callAssetIngestion(text: string): Promise<AssetResponse | null> {
+async function callAssetIngestion(
+  text: string,
+  files?: Express.Multer.File[],
+): Promise<AssetResponse | null> {
+  const items: any[] = [];
+
+  // Each file → one item with base64-encoded data
+  if (files && files.length > 0) {
+    for (const file of files) {
+      const fileType = getFileType(file);
+      const origName = Buffer.from(file.originalname, "latin1").toString("utf-8");
+      items.push({
+        type: fileType,
+        filename: origName,
+        data: file.buffer.toString("base64"),
+        mimeType: file.mimetype,
+      });
+    }
+  }
+
+  // User-typed text → one item (or the only item if no files)
+  if (text.trim()) {
+    items.push({ type: "text", text });
+  }
+
+  if (items.length === 0) return null;
+
+  // Send all items as JSON array — n8n Split Out will handle separation
   const response = await fetch(`${N8N_WEBHOOK_URL}/asset-ingestion`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "text", text }),
-    signal: AbortSignal.timeout(60000),
+    body: JSON.stringify({ items }),
+    signal: AbortSignal.timeout(120000),
   });
   if (!response.ok) throw new Error(`asset-ingestion returned ${response.status}`);
   return await response.json();
+}
+
+function getFileType(file: Express.Multer.File): string {
+  const mime = file.mimetype;
+  if (mime === "application/pdf") return "pdf";
+  if (mime.includes("word") || mime.includes("document") || file.originalname.endsWith(".docx")) return "docx";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  return "text";
 }
 
 function convertFromAssetResult(asset: AssetResponse): ParseResult {

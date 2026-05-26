@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "n8n": {
+      "type": "command",
+      "command": "node",
+      "args": ["scripts/mcp-n8n-bridge.mjs"]
+    }
+  }
+}
