@@ -94,20 +94,7 @@ export default function ProjectCard({ project, onClick, onDelete }: Props) {
         >
           {project.name}
         </div>
-        {project.description && (
-          <div
-            style={{
-              fontSize: 12,
-              color: theme.colors.text.tertiary,
-              lineHeight: 1.4,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {project.description}
-          </div>
-        )}
+        {/* description hidden — was breaking card layout with long cognition summary */}
       </div>
 
       {count && (
