@@ -69,6 +69,8 @@ export default function OptimizationPanel({ projectId }: Props) {
   const [inputText, setInputText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
+  const [fileBase64, setFileBase64] = useState<string | null>(null);
+  const [fileWarning, setFileWarning] = useState<string | null>(null);
   const [segments, setSegments] = useState<ParsedSegment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [entityLookup, setEntityLookup] = useState<EntityOption[]>([]);
@@ -77,9 +79,11 @@ export default function OptimizationPanel({ projectId }: Props) {
 
   // Dropdown state for clicking existing entities
   const [dropdownIndex, setDropdownIndex] = useState<number | null>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const entityRefs = useRef<Map<number, HTMLElement>>(new Map());
 
   // Load entity lookup on mount
   useEffect(() => {
@@ -93,7 +97,7 @@ export default function OptimizationPanel({ projectId }: Props) {
     if (dropdownIndex === null) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target.closest("[data-dropdown]")) setDropdownIndex(null);
+      if (!target.closest("[data-dropdown]")) { setDropdownIndex(null); setDropdownPosition(null); }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -104,6 +108,24 @@ export default function OptimizationPanel({ projectId }: Props) {
     const file = e.target.files?.[0];
     if (!file) return;
     setFileName(file.name);
+    setFileWarning(null);
+    setFileContent(null);
+    setFileBase64(null);
+
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const BINARY_EXTS = ['docx', 'doc', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx'];
+
+    if (BINARY_EXTS.includes(ext || '')) {
+      // Read binary file as base64 for server-side text extraction
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(',')[1]; // strip data:...;base64, prefix
+        setFileBase64(base64);
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       setFileContent(reader.result as string);
@@ -114,7 +136,7 @@ export default function OptimizationPanel({ projectId }: Props) {
   // Submit optimization
   const handleOptimize = useCallback(async () => {
     const text = inputText.trim() || "";
-    if (!text && !fileContent) return;
+    if (!text && !fileContent && !fileBase64) return;
 
     setState("loading");
     setError(null);
@@ -126,6 +148,7 @@ export default function OptimizationPanel({ projectId }: Props) {
           projectId,
           rawText: text,
           fileContent: fileContent || undefined,
+          ...(fileBase64 && fileName ? { fileBase64, fileName } : {}),
         }),
       });
 
@@ -138,7 +161,7 @@ export default function OptimizationPanel({ projectId }: Props) {
       setError(err instanceof Error ? err.message : "优化失败");
       setState("input");
     }
-  }, [inputText, fileContent, projectId]);
+  }, [inputText, fileContent, fileBase64, fileName, projectId]);
 
   // Replace existing entity
   const handleReplaceEntity = useCallback((segIdx: number, entity: EntityOption) => {
@@ -159,6 +182,7 @@ export default function OptimizationPanel({ projectId }: Props) {
       })
     ));
     setDropdownIndex(null);
+    setDropdownPosition(null);
   }, [segments]);
 
   // Handle text edit from textarea
@@ -184,11 +208,14 @@ export default function OptimizationPanel({ projectId }: Props) {
     setInputText("");
     setFileName(null);
     setFileContent(null);
+    setFileBase64(null);
+    setFileWarning(null);
     setSegments([]);
     setError(null);
     setEditingText("");
     setIsEditing(false);
     setDropdownIndex(null);
+    setDropdownPosition(null);
   }, []);
 
   return (
@@ -282,6 +309,11 @@ export default function OptimizationPanel({ projectId }: Props) {
                   {fileName}
                 </span>
               )}
+              {fileWarning && (
+                <div style={{ fontSize: 11, color: theme.colors.accent.red, maxWidth: 300, lineHeight: 1.4 }}>
+                  ⚠️ {fileWarning}
+                </div>
+              )}
             </div>
 
             {/* Optimize button */}
@@ -373,9 +405,23 @@ export default function OptimizationPanel({ projectId }: Props) {
                   if (seg.type === "existing") {
                     const matched = entityLookup.find((e) => e.name === seg.name && e.type === seg.kind);
                     return (
-                      <span key={i} style={{ position: "relative", display: "inline" }}>
+                      <span key={i} style={{ display: "inline" }}>
                         <span
-                          onClick={() => setDropdownIndex(dropdownIndex === i ? null : i)}
+                          ref={(el) => { if (el) entityRefs.current.set(i, el); else entityRefs.current.delete(i); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (dropdownIndex === i) {
+                              setDropdownIndex(null);
+                              setDropdownPosition(null);
+                            } else {
+                              const el = entityRefs.current.get(i);
+                              if (el) {
+                                const rect = el.getBoundingClientRect();
+                                setDropdownPosition({ top: rect.bottom + 4, left: rect.left });
+                              }
+                              setDropdownIndex(i);
+                            }
+                          }}
                           style={{
                             display: "inline-block",
                             padding: "1px 8px",
@@ -394,14 +440,14 @@ export default function OptimizationPanel({ projectId }: Props) {
                         </span>
 
                         {/* Dropdown for entity replacement */}
-                        {dropdownIndex === i && (
+                        {dropdownIndex === i && dropdownPosition && (
                           <div
                             data-dropdown
                             style={{
-                              position: "absolute",
-                              top: "100%",
-                              left: 0,
-                              zIndex: 30,
+                              position: "fixed",
+                              top: dropdownPosition.top,
+                              left: dropdownPosition.left,
+                              zIndex: 1000,
                               minWidth: 200,
                               maxHeight: 200,
                               overflow: "auto",

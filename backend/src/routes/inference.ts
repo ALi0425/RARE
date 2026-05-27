@@ -1,17 +1,34 @@
 import { Router } from "express";
 import prisma from "../lib/prisma";
+import { extractTextFromBuffer } from "../lib/fileExtractor";
 
 const router = Router();
 
 // POST /api/inference/refine
 router.post("/refine", async (req, res) => {
-  const { projectId, rawText, fileContent } = req.body;
+  let { projectId, rawText, fileContent: rawFileContent, fileBase64, fileName } = req.body;
   if (!projectId) {
     return res.status(400).json({ error: "projectId required" });
   }
-  if (!rawText && !fileContent) {
-    return res.status(400).json({ error: "rawText or fileContent required" });
+  if (!rawText && !rawFileContent && !fileBase64) {
+    return res.status(400).json({ error: "rawText or fileContent or fileBase64 required" });
   }
+
+  // Extract text from binary file upload (base64)
+  if (fileBase64 && fileName) {
+    try {
+      const buffer = Buffer.from(fileBase64, "base64");
+      const extracted = await extractTextFromBuffer(buffer, fileName);
+      if (extracted) {
+        rawFileContent = extracted;
+      }
+    } catch (err) {
+      console.warn("[refine] base64 extraction failed:", err);
+    }
+  }
+
+  // Detect and filter binary garbled content
+  const fileContent = isBinaryGarbage(rawFileContent || "") ? "" : (rawFileContent || "");
 
   try {
     // Fetch project cognition summary from DB
@@ -176,16 +193,34 @@ async function tryN8nEvaluate(
 async function getEntityLookup(projectId: string) {
   const [modules, pages, fields, actions] = await Promise.all([
     prisma.module.findMany({ where: { projectId }, select: { id: true, name: true } }),
-    prisma.page.findMany({ where: { projectId }, select: { id: true, name: true } }),
-    prisma.field.findMany({ where: { projectId }, select: { id: true, name: true } }),
-    prisma.action.findMany({ where: { projectId }, select: { id: true, name: true } }),
+    prisma.page.findMany({ where: { projectId }, select: { id: true, name: true, moduleId: true } }),
+    prisma.field.findMany({ where: { projectId }, select: { id: true, name: true, pageId: true } }),
+    prisma.action.findMany({ where: { projectId }, select: { id: true, name: true, pageId: true } }),
   ]);
 
+  const moduleMap = new Map(modules.map((m) => [m.id, m.name]));
+  const pageMap = new Map(pages.map((p) => [p.id, p.name]));
+
   return [
-    ...modules.map((m) => ({ id: m.id, name: m.name, type: "module" as const })),
-    ...pages.map((p) => ({ id: p.id, name: p.name, type: "page" as const })),
-    ...fields.map((f) => ({ id: f.id, name: f.name, type: "field" as const })),
-    ...actions.map((a) => ({ id: a.id, name: a.name, type: "action" as const })),
+    ...modules.map((m) => ({
+      id: m.id, name: m.name, type: "module" as const,
+      module_name: null as string | null, page_name: null as string | null,
+    })),
+    ...pages.map((p) => ({
+      id: p.id, name: p.name, type: "page" as const,
+      module_name: p.moduleId ? moduleMap.get(p.moduleId) || null : null,
+      page_name: null as string | null,
+    })),
+    ...fields.map((f) => ({
+      id: f.id, name: f.name, type: "field" as const,
+      module_name: null as string | null,
+      page_name: f.pageId ? pageMap.get(f.pageId) || null : null,
+    })),
+    ...actions.map((a) => ({
+      id: a.id, name: a.name, type: "action" as const,
+      module_name: null as string | null,
+      page_name: a.pageId ? pageMap.get(a.pageId) || null : null,
+    })),
   ];
 }
 
@@ -249,6 +284,23 @@ function fallbackRefine(rawText: string, _fileContent: string, projectSummary: s
   ];
 
   return { refinedText, entities };
+}
+
+// ── Binary content detection ──
+
+function isBinaryGarbage(text: string): boolean {
+  if (!text) return false;
+  if (text.includes("�")) return true;
+  if (text.includes("\0")) return true;
+  let ctrlCount = 0;
+  const len = Math.min(text.length, 2000);
+  for (let i = 0; i < len; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 0 || (code < 32 && code !== 10 && code !== 13 && code !== 9)) {
+      ctrlCount++;
+    }
+  }
+  return ctrlCount > Math.max(20, len * 0.1);
 }
 
 export default router;

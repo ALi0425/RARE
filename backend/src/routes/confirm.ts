@@ -1,5 +1,6 @@
 import { Router } from "express";
 import prisma from "../lib/prisma";
+import { extractText } from "../lib/fileExtractor";
 
 const router = Router();
 
@@ -108,16 +109,17 @@ router.post("/:projectId", async (req, res) => {
     });
     if (!project) throw new Error("Project not found");
 
-    // Read original file content for context
+    // Extract text from project files (supports .docx, .pdf, .xlsx, .pptx, .txt, etc.)
     const filesContent: string[] = [];
     for (const f of project.files) {
       try {
-        const fs = await import("fs");
-        if (fs.existsSync(f.storagePath)) {
-          const content = fs.readFileSync(f.storagePath, "utf-8");
+        const content = await extractText(f.storagePath, f.originalName);
+        if (content) {
           filesContent.push(`[${f.originalName}]:\n${content.slice(0, 5000)}`);
+        } else {
+          console.log(`[cognition] no text extracted from: ${f.originalName}`);
         }
-      } catch { /* skip unreadable files */ }
+      } catch { /* skip */ }
     }
 
     const payload = {

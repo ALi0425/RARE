@@ -213,11 +213,11 @@ export default function NodeBox({ id, data, type, children }: NodeBoxProps) {
       }}
       title={diffTooltip}
     >
-      {/* Handles (tiny+transparent in eval mode so edges still connect) */}
-      <Handle type="target" position={Position.Left} style={{ background: m.accent, width: isEval ? 1 : 7, height: isEval ? 1 : 7, border: "2px solid #1a1a1a", borderRadius: "50%", opacity: isEval ? 0 : 1, pointerEvents: "none" }} id="left" />
-      <Handle type="source" position={Position.Right} style={{ background: m.accent, width: isEval ? 1 : 7, height: isEval ? 1 : 7, border: "2px solid #1a1a1a", borderRadius: "50%", opacity: isEval ? 0 : 1, pointerEvents: "none" }} id="right" />
-      <Handle type="target" position={Position.Top} style={{ background: m.accent, width: isEval ? 1 : 7, height: isEval ? 1 : 7, border: "2px solid #1a1a1a", borderRadius: "50%", opacity: isEval ? 0 : 1, pointerEvents: "none" }} id="top" />
-      <Handle type="source" position={Position.Bottom} style={{ background: m.accent, width: isEval ? 1 : 7, height: isEval ? 1 : 7, border: "2px solid #1a1a1a", borderRadius: "50%", opacity: isEval ? 0 : 1, pointerEvents: "none" }} id="bottom" />
+      {/* Handles (non-interactive in eval mode) */}
+      <Handle type="target" position={Position.Left} style={{ background: m.accent, width: isEval ? 1 : 7, height: isEval ? 1 : 7, border: "2px solid #1a1a1a", borderRadius: "50%", opacity: isEval ? 0 : 1, pointerEvents: isEval ? "none" : "auto" }} id="left" />
+      <Handle type="source" position={Position.Right} style={{ background: m.accent, width: isEval ? 1 : 7, height: isEval ? 1 : 7, border: "2px solid #1a1a1a", borderRadius: "50%", opacity: isEval ? 0 : 1, pointerEvents: isEval ? "none" : "auto" }} id="right" />
+      <Handle type="target" position={Position.Top} style={{ background: m.accent, width: isEval ? 1 : 7, height: isEval ? 1 : 7, border: "2px solid #1a1a1a", borderRadius: "50%", opacity: isEval ? 0 : 1, pointerEvents: isEval ? "none" : "auto" }} id="top" />
+      <Handle type="source" position={Position.Bottom} style={{ background: m.accent, width: isEval ? 1 : 7, height: isEval ? 1 : 7, border: "2px solid #1a1a1a", borderRadius: "50%", opacity: isEval ? 0 : 1, pointerEvents: isEval ? "none" : "auto" }} id="bottom" />
 
       {/* ── Active level: big centered name ── */}
       {isEval && evalDisplay === "active" && (
