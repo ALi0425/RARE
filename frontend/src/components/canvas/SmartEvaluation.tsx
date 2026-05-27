@@ -13,6 +13,7 @@ import { useCanvasStore } from "../../store/canvasStore";
 import { nodeTypes } from "../canvas/nodeTypes";
 import { theme } from "../../theme/tokens";
 import Spinner from "../ui/Spinner";
+import OptimizationPanel from "./OptimizationPanel";
 
 interface Props {
   projectId: string;
@@ -30,13 +31,13 @@ function getLevel(zoom: number): ZoomLevel {
 }
 
 function SmartEvaluationInner() {
-  const projectName = useCanvasStore((s) => s.projectName);
   const allNodes = useCanvasStore((s) => s.nodes);
   const allEdges = useCanvasStore((s) => s.edges);
   const loading = useCanvasStore((s) => s.loading);
   const confirmedAt = useCanvasStore((s) => s.confirmedAt);
   const confirmedSummary = useCanvasStore((s) => s.confirmedSummary);
   const rf = useReactFlow();
+  const projectId = useCanvasStore((s) => s.projectId);
 
   const [level, setLevel] = useState<ZoomLevel>("module");
   const levelRef = useRef<ZoomLevel>("module");
@@ -93,13 +94,9 @@ function SmartEvaluationInner() {
 
   return (
     <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", background: theme.colors.bg.app }}>
-      {/* Top bar */}
+      {/* Top bar — simplified */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 16px", background: theme.colors.bg.surface, borderBottom: `1px solid ${theme.colors.border.subtle}`, zIndex: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: theme.colors.text.primary }}>智能评估</span>
-          <span style={{ fontSize: 11, color: theme.colors.text.tertiary, background: theme.colors.bg.elevated, padding: "2px 8px", borderRadius: 8 }}>{projectName}</span>
-          <span style={{ fontSize: 11, color: theme.colors.text.tertiary, background: theme.colors.bg.elevated, padding: "2px 8px", borderRadius: 8 }}>节点 {allNodes.length} / 连线 {allEdges.length}</span>
-        </div>
+        <span style={{ fontSize: 14, fontWeight: 600, color: theme.colors.text.primary }}>智能评估</span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 11, color: theme.colors.text.tertiary, marginRight: 4 }}>当前层级:</span>
           {(["module", "page", "field"] as const).map((l) => {
@@ -143,6 +140,9 @@ function SmartEvaluationInner() {
           <Controls style={{ borderRadius: theme.radius.sm, boxShadow: theme.shadow.md }} />
           <MiniMap style={{ borderRadius: theme.radius.sm, boxShadow: theme.shadow.md }} pannable zoomable />
         </ReactFlow>
+
+        {/* Floating optimization panel */}
+        {projectId && <OptimizationPanel projectId={projectId} />}
       </div>
     </div>
   );
