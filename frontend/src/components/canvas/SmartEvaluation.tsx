@@ -110,9 +110,26 @@ function SmartEvaluationInner() {
     });
 
     // Create demo nodes for new entities
-    // Track page/field count per parent for vertical stacking
+    // Track page/field count per parent for vertical stacking.
+    // Seed counters with existing children so demo nodes don't overlap existing ones
     const pageCountPerParent = new Map<string, number>();
     const fieldCountPerParent = new Map<string, number>();
+    for (const n of allNodes) {
+      if (n.type === "page" && n.parentId) {
+        const parent = allNodes.find(p => p.id === n.parentId);
+        if (parent) {
+          const label = (parent.data as any)?.label || parent.id;
+          pageCountPerParent.set(label, (pageCountPerParent.get(label) || 0) + 1);
+        }
+      }
+      if ((n.type === "field" || n.type === "action") && n.parentId) {
+        const parent = allNodes.find(p => p.id === n.parentId);
+        if (parent) {
+          const label = (parent.data as any)?.label || parent.id;
+          fieldCountPerParent.set(label, (fieldCountPerParent.get(label) || 0) + 1);
+        }
+      }
+    }
     for (const ne of sortedEntities) {
       const id = `demo-new-${demoIdx}`;
       newNameToId.set(ne.name, id);

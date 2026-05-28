@@ -347,7 +347,7 @@ router.post("/apply-impact", async (req, res) => {
     // Fetch parent positions for calculating child positions
     const [parentModules, parentPages] = await Promise.all([
       prisma.module.findMany({ where: { projectId }, select: { id: true, name: true, posX: true, posY: true } }),
-      prisma.page.findMany({ where: { projectId }, select: { id: true, name: true, posX: true, posY: true } }),
+      prisma.page.findMany({ where: { projectId }, select: { id: true, name: true, posX: true, posY: true, moduleId: true } }),
     ]);
     const parentNameToPos = new Map<string, { x: number; y: number }>();
     for (const m of parentModules) parentNameToPos.set(m.name, { x: m.posX, y: m.posY });
@@ -404,6 +404,14 @@ router.post("/apply-impact", async (req, res) => {
 
     // 2. Create pages (with per-parent counter for stacking)
     const pageCnt = new Map<string, number>();
+    // Seed with existing pages per parent module
+    const parentModuleIdToName = new Map(parentModules.map((m: any) => [m.id, m.name]));
+    for (const p of parentPages) {
+      if (p.moduleId) {
+        const mName = parentModuleIdToName.get(p.moduleId);
+        if (mName) pageCnt.set(mName, (pageCnt.get(mName) || 0) + 1);
+      }
+    }
     const newPages = (newEntities || []).filter((e: any) => e.type === "page");
     for (const p of newPages) {
       if (nameToExistingId.has(p.name)) {
@@ -421,8 +429,13 @@ router.post("/apply-impact", async (req, res) => {
       nameToNewId.set(p.name, created.id);
     }
 
-    // 3. Create fields (with per-parent counter)
-    const fieldCnt = new Map<string, number>();
+    // 3+4. Create fields & actions (shared per-parent counter to prevent overlap)
+    const childCountPerParent = new Map<string, number>();
+    // Seed counter with existing children count per parent
+    const existingChildCounts = await getExistingChildCount(projectId);
+    for (const [parentKey, count] of existingChildCounts) {
+      childCountPerParent.set(parentKey, count);
+    }
     const newFields = (newEntities || []).filter((e: any) => e.type === "field");
     for (const f of newFields) {
       if (nameToExistingId.has(f.name)) {
@@ -431,8 +444,8 @@ router.post("/apply-impact", async (req, res) => {
       }
       const pageId = await ensureApplyParent(f.parentName);
       const pk = f.parentName || "__root__";
-      const idx = fieldCnt.get(pk) || 0;
-      fieldCnt.set(pk, idx + 1);
+      const idx = childCountPerParent.get(pk) || 0;
+      childCountPerParent.set(pk, idx + 1);
       const pos = calcPos(f.parentName, idx, false);
       const created = await prisma.field.create({
         data: { projectId, pageId, name: f.name, fieldType: f.fieldType || "string", posX: pos.posX, posY: pos.posY },
@@ -440,8 +453,6 @@ router.post("/apply-impact", async (req, res) => {
       nameToNewId.set(f.name, created.id);
     }
 
-    // 4. Create actions (with per-parent counter)
-    const actionCnt = new Map<string, number>();
     const newActions = (newEntities || []).filter((e: any) => e.type === "action");
     for (const a of newActions) {
       if (nameToExistingId.has(a.name)) {
@@ -450,8 +461,8 @@ router.post("/apply-impact", async (req, res) => {
       }
       const pageId = await ensureApplyParent(a.parentName);
       const pk = a.parentName || "__root__";
-      const idx = actionCnt.get(pk) || 0;
-      actionCnt.set(pk, idx + 1);
+      const idx = childCountPerParent.get(pk) || 0;
+      childCountPerParent.set(pk, idx + 1);
       const pos = calcPos(a.parentName, idx, false);
       const created = await prisma.action.create({
         data: { projectId, pageId, name: a.name, actionType: a.actionType || "operation", posX: pos.posX, posY: pos.posY },
@@ -714,6 +725,14 @@ async function saveNewEntitiesWithStatus(
 
   // 2. Create pages (with per-module counter for stacking)
   const pageCountPerParent = new Map<string, number>();
+  // Seed with existing pages per parent module
+  const extraModuleIdToName = new Map(extraModules.map((m: any) => [m.id, m.name]));
+  for (const p of extraPages) {
+    if (p.moduleId) {
+      const mName = extraModuleIdToName.get(p.moduleId);
+      if (mName) pageCountPerParent.set(mName, (pageCountPerParent.get(mName) || 0) + 1);
+    }
+  }
   const newPages = newEntities.filter((e: any) => e.type === "page");
   for (const p of newPages) {
     if (nameToExistingId.has(p.name)) { nameToNewId.set(p.name, nameToExistingId.get(p.name)!); continue; }
@@ -729,14 +748,19 @@ async function saveNewEntitiesWithStatus(
     nameToNewId.set(p.name, created.id);
   }
 
-  // 3. Create fields (with per-page counter for stacking)
-  const fieldCountPerParent = new Map<string, number>();
+  // 3+4. Create fields & actions (shared per-parent counter to prevent overlap)
+  const childCountPerParent = new Map<string, number>();
+  // Seed counter with existing children already in DB for this parent
+  const existingChildCounts = await getExistingChildCount(projectId);
+  for (const [parentKey, count] of existingChildCounts) {
+    childCountPerParent.set(parentKey, count);
+  }
   const newFields = newEntities.filter((e: any) => e.type === "field");
   for (const f of newFields) {
     if (nameToExistingId.has(f.name)) { nameToNewId.set(f.name, nameToExistingId.get(f.name)!); continue; }
     const parentKey = f.parentName || "__root__";
-    const idx = fieldCountPerParent.get(parentKey) || 0;
-    fieldCountPerParent.set(parentKey, idx + 1);
+    const idx = childCountPerParent.get(parentKey) || 0;
+    childCountPerParent.set(parentKey, idx + 1);
     const pos = childPos(f.parentName, idx, false);
     const pageId = await ensureParent(f.parentName);
     const created = await prisma.field.create({
@@ -745,14 +769,12 @@ async function saveNewEntitiesWithStatus(
     nameToNewId.set(f.name, created.id);
   }
 
-  // 4. Create actions (with per-page counter for stacking)
-  const actionCountPerParent = new Map<string, number>();
   const newActions = newEntities.filter((e: any) => e.type === "action");
   for (const a of newActions) {
     if (nameToExistingId.has(a.name)) { nameToNewId.set(a.name, nameToExistingId.get(a.name)!); continue; }
     const parentKey = a.parentName || "__root__";
-    const idx = actionCountPerParent.get(parentKey) || 0;
-    actionCountPerParent.set(parentKey, idx + 1);
+    const idx = childCountPerParent.get(parentKey) || 0;
+    childCountPerParent.set(parentKey, idx + 1);
     const pos = childPos(a.parentName, idx, false);
     const pageId = await ensureParent(a.parentName);
     const created = await prisma.action.create({
@@ -826,6 +848,30 @@ async function triggerVectorSync(projectId: string) {
   } catch (err) {
     console.warn("[vector-sync] trigger failed:", err);
   }
+}
+
+// ── Helper: count existing fields+actions per parent page (by page NAME, not ID) ──
+async function getExistingChildCount(projectId: string): Promise<Map<string, number>> {
+  const [fields, actions, allPages] = await Promise.all([
+    prisma.field.findMany({ where: { projectId, pageId: { not: null } }, select: { pageId: true } }),
+    prisma.action.findMany({ where: { projectId, pageId: { not: null } }, select: { pageId: true } }),
+    prisma.page.findMany({ where: { projectId }, select: { id: true, name: true } }),
+  ]);
+  const pageIdToName = new Map(allPages.map((p) => [p.id, p.name]));
+  const counts = new Map<string, number>();
+  for (const f of fields) {
+    if (f.pageId) {
+      const name = pageIdToName.get(f.pageId);
+      if (name) counts.set(name, (counts.get(name) || 0) + 1);
+    }
+  }
+  for (const a of actions) {
+    if (a.pageId) {
+      const name = pageIdToName.get(a.pageId);
+      if (name) counts.set(name, (counts.get(name) || 0) + 1);
+    }
+  }
+  return counts;
 }
 
 export default router;
