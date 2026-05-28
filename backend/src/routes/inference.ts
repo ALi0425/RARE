@@ -224,6 +224,293 @@ async function getEntityLookup(projectId: string) {
   ];
 }
 
+// ── POST /impact — Impact Assessment (via n8n) + save "未入库" entities ──
+router.post("/impact", async (req, res) => {
+  const { projectId, refinedText, selectedModule, projectSummary } = req.body;
+  if (!projectId || !refinedText) {
+    return res.status(400).json({ error: "projectId and refinedText required" });
+  }
+
+  try {
+    // Fetch existing entities for context
+    const existingEntities = await getEntityLookup(projectId);
+
+    // Call n8n webhook (which calls Ollama internally)
+    const response = await fetch(`${N8N_BASE}/req-impact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        refinedText,
+        selectedModule: selectedModule || undefined,
+        projectSummary: projectSummary || undefined,
+        entities: existingEntities,
+      }),
+      signal: AbortSignal.timeout(120000),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      console.warn("[impact] n8n returned", response.status, body.slice(0, 300));
+      return res.status(502).json({ error: "影响评估服务暂不可用" });
+    }
+
+    const result = await response.json();
+
+    // Save new entities with status "未入库"
+    try {
+      await saveNewEntitiesWithStatus(projectId, {
+        newEntities: result.newEntities || [],
+        newEdges: result.newEdges || [],
+      }, existingEntities);
+    } catch (saveErr) {
+      console.error("[impact] save entities failed:", saveErr);
+      // Non-fatal: still return result to frontend
+    }
+
+    // Trigger incremental vector sync (fire-and-forget)
+    triggerVectorSync(projectId).catch((err) =>
+      console.warn("[impact] vector sync trigger failed:", err)
+    );
+
+    res.json({
+      impactDescription: result.impactDescription || "",
+      newEntities: result.newEntities || [],
+      affectedEntities: result.affectedEntities || [],
+      newEdges: result.newEdges || [],
+    });
+  } catch (err) {
+    console.error("[impact] error:", err);
+    res.status(500).json({ error: "影响评估失败" });
+  }
+});
+
+// ── POST /inference/apply-impact-status — "未入库" → "已入库" ──
+router.post("/apply-impact-status", async (req, res) => {
+  const { projectId } = req.body;
+  if (!projectId) {
+    return res.status(400).json({ error: "projectId required" });
+  }
+
+  try {
+    await Promise.all([
+      prisma.module.updateMany({ where: { projectId, recordStatus: "未入库" }, data: { recordStatus: "已入库" } }),
+      prisma.page.updateMany({ where: { projectId, recordStatus: "未入库" }, data: { recordStatus: "已入库" } }),
+      prisma.field.updateMany({ where: { projectId, recordStatus: "未入库" }, data: { recordStatus: "已入库" } }),
+      prisma.action.updateMany({ where: { projectId, recordStatus: "未入库" }, data: { recordStatus: "已入库" } }),
+      prisma.edge.updateMany({ where: { projectId, recordStatus: "未入库" }, data: { recordStatus: "已入库" } }),
+    ]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[apply-impact-status] error:", err);
+    res.status(500).json({ error: "状态更新失败" });
+  }
+});
+
+// ── DELETE /inference/cancel-impact-entities — 删除 "未入库" 数据 ──
+router.delete("/cancel-impact-entities", async (req, res) => {
+  const { projectId } = req.body;
+  if (!projectId) {
+    return res.status(400).json({ error: "projectId required" });
+  }
+
+  try {
+    await Promise.all([
+      prisma.edge.deleteMany({ where: { projectId, recordStatus: "未入库" } }),
+      prisma.action.deleteMany({ where: { projectId, recordStatus: "未入库" } }),
+      prisma.field.deleteMany({ where: { projectId, recordStatus: "未入库" } }),
+      prisma.page.deleteMany({ where: { projectId, recordStatus: "未入库" } }),
+      prisma.module.deleteMany({ where: { projectId, recordStatus: "未入库" } }),
+    ]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[cancel-impact-entities] error:", err);
+    res.status(500).json({ error: "删除失败" });
+  }
+});
+
+// ── POST /apply-impact — Save impact assessment results ──
+router.post("/apply-impact", async (req, res) => {
+  const { projectId, impactResult } = req.body;
+  if (!projectId || !impactResult) {
+    return res.status(400).json({ error: "projectId and impactResult required" });
+  }
+
+  try {
+    const { newEntities, affectedEntities, newEdges } = impactResult;
+
+    // Build a name→id map for existing entities
+    const existing = await getEntityLookup(projectId);
+    const nameToExistingId = new Map<string, string>();
+    for (const e of existing) nameToExistingId.set(e.name, e.id);
+
+    // Fetch parent positions for calculating child positions
+    const [parentModules, parentPages] = await Promise.all([
+      prisma.module.findMany({ where: { projectId }, select: { id: true, name: true, posX: true, posY: true } }),
+      prisma.page.findMany({ where: { projectId }, select: { id: true, name: true, posX: true, posY: true } }),
+    ]);
+    const parentNameToPos = new Map<string, { x: number; y: number }>();
+    for (const m of parentModules) parentNameToPos.set(m.name, { x: m.posX, y: m.posY });
+    for (const p of parentPages) parentNameToPos.set(p.name, { x: p.posX, y: p.posY });
+
+    const calcPos = (parentName: string | null, idx: number, isPage: boolean) => {
+      if (parentName && parentNameToPos.has(parentName)) {
+        const p = parentNameToPos.get(parentName)!;
+        return { posX: p.x + (isPage ? 20 : 16), posY: p.y + 36 + idx * 52 };
+      }
+      return { posX: 100 + (idx % 3) * 200, posY: 200 + Math.floor(idx / 3) * 100 };
+    };
+
+    // Also create maps for newly created entities
+    const nameToNewId = new Map<string, string>();
+
+    // Auto-create missing parent entity (fallback for safety)
+    const ensureApplyParent = async (parentName: string | null): Promise<string | null> => {
+      if (!parentName) return null;
+      const existingId = nameToNewId.get(parentName) || nameToExistingId.get(parentName);
+      if (existingId) return existingId;
+      const candidate = (newEntities || []).find((e: any) => e.name === parentName);
+      if (!candidate) return null;
+      if (nameToNewId.has(candidate.name)) return nameToNewId.get(candidate.name)!;
+      if (candidate.type === "module") {
+        const m = await prisma.module.create({ data: { projectId, name: candidate.name, posX: 100, posY: 100 } });
+        nameToNewId.set(m.name, m.id);
+        parentNameToPos.set(m.name, { x: m.posX, y: m.posY });
+        return m.id;
+      }
+      if (candidate.type === "page") {
+        const mid = candidate.parentName ? await ensureApplyParent(candidate.parentName) : null;
+        const p = await prisma.page.create({ data: { projectId, moduleId: mid, name: candidate.name, posX: 100, posY: 100 } });
+        nameToNewId.set(p.name, p.id);
+        parentNameToPos.set(p.name, { x: p.posX, y: p.posY });
+        return p.id;
+      }
+      return null;
+    };
+
+    // 1. Create modules first
+    const newModules = (newEntities || []).filter((e: any) => e.type === "module");
+    for (const m of newModules) {
+      if (nameToExistingId.has(m.name)) {
+        nameToNewId.set(m.name, nameToExistingId.get(m.name)!);
+        continue;
+      }
+      const created = await prisma.module.create({
+        data: { projectId, name: m.name, posX: 100, posY: 100 },
+      });
+      nameToNewId.set(m.name, created.id);
+      applyIdx++;
+    }
+
+    // 2. Create pages (with per-parent counter for stacking)
+    const pageCnt = new Map<string, number>();
+    const newPages = (newEntities || []).filter((e: any) => e.type === "page");
+    for (const p of newPages) {
+      if (nameToExistingId.has(p.name)) {
+        nameToNewId.set(p.name, nameToExistingId.get(p.name)!);
+        continue;
+      }
+      const moduleId = await ensureApplyParent(p.parentName);
+      const pk = p.parentName || "__root__";
+      const idx = pageCnt.get(pk) || 0;
+      pageCnt.set(pk, idx + 1);
+      const pos = calcPos(p.parentName, idx, true);
+      const created = await prisma.page.create({
+        data: { projectId, moduleId, name: p.name, posX: pos.posX, posY: pos.posY },
+      });
+      nameToNewId.set(p.name, created.id);
+    }
+
+    // 3. Create fields (with per-parent counter)
+    const fieldCnt = new Map<string, number>();
+    const newFields = (newEntities || []).filter((e: any) => e.type === "field");
+    for (const f of newFields) {
+      if (nameToExistingId.has(f.name)) {
+        nameToNewId.set(f.name, nameToExistingId.get(f.name)!);
+        continue;
+      }
+      const pageId = await ensureApplyParent(f.parentName);
+      const pk = f.parentName || "__root__";
+      const idx = fieldCnt.get(pk) || 0;
+      fieldCnt.set(pk, idx + 1);
+      const pos = calcPos(f.parentName, idx, false);
+      const created = await prisma.field.create({
+        data: { projectId, pageId, name: f.name, fieldType: f.fieldType || "string", posX: pos.posX, posY: pos.posY },
+      });
+      nameToNewId.set(f.name, created.id);
+    }
+
+    // 4. Create actions (with per-parent counter)
+    const actionCnt = new Map<string, number>();
+    const newActions = (newEntities || []).filter((e: any) => e.type === "action");
+    for (const a of newActions) {
+      if (nameToExistingId.has(a.name)) {
+        nameToNewId.set(a.name, nameToExistingId.get(a.name)!);
+        continue;
+      }
+      const pageId = await ensureApplyParent(a.parentName);
+      const pk = a.parentName || "__root__";
+      const idx = actionCnt.get(pk) || 0;
+      actionCnt.set(pk, idx + 1);
+      const pos = calcPos(a.parentName, idx, false);
+      const created = await prisma.action.create({
+        data: { projectId, pageId, name: a.name, actionType: a.actionType || "operation", posX: pos.posX, posY: pos.posY },
+      });
+      nameToNewId.set(a.name, created.id);
+    }
+
+    // 5. Determine affected entity IDs (mark existing ones)
+    const affectedIds: string[] = [];
+    for (const ae of affectedEntities || []) {
+      const id = nameToExistingId.get(ae.name);
+      if (id) affectedIds.push(id);
+    }
+
+    // 6. Create new edges
+    for (const edge of newEdges || []) {
+      const sourceId = nameToNewId.get(edge.sourceName) || nameToExistingId.get(edge.sourceName);
+      const targetId = nameToNewId.get(edge.targetName) || nameToExistingId.get(edge.targetName);
+      if (!sourceId || !targetId) {
+        console.warn(`[apply-impact] skipping edge: unknown entity "${edge.sourceName}" → "${edge.targetName}"`);
+        continue;
+      }
+      // Check if edge already exists
+      const exists = await prisma.edge.findFirst({
+        where: { projectId, sourceId, targetId },
+      });
+      if (!exists) {
+        await prisma.edge.create({
+          data: {
+            projectId,
+            sourceId,
+            targetId,
+            label: edge.label || "影响关联",
+            flowType: edge.flowType || "BUSINESS_FLOW",
+            status: "extracted",
+          },
+        });
+      }
+    }
+
+    // 7. Return updated project data
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        modules: { include: { pages: { include: { fields: true, actions: true } } }, orderBy: { createdAt: "asc" } },
+        pages: { where: { moduleId: null }, include: { fields: true, actions: true }, orderBy: { createdAt: "asc" } },
+        fields: { where: { pageId: null } },
+        actions: { where: { pageId: null } },
+        edges: { orderBy: { createdAt: "asc" } },
+      },
+    });
+
+    res.json({ project, affectedIds });
+  } catch (err) {
+    console.error("[apply-impact] error:", err);
+    res.status(500).json({ error: "Apply impact failed" });
+  }
+});
+
 // ── Fallback refine (when n8n unavailable) ──
 
 function fallbackRefine(rawText: string, _fileContent: string, projectSummary: string) {
@@ -301,6 +588,244 @@ function isBinaryGarbage(text: string): boolean {
     }
   }
   return ctrlCount > Math.max(20, len * 0.1);
+}
+
+// ── GET /inference/unsaved-entities/:projectId — 获取 "未入库" 数据 ──
+router.get("/unsaved-entities/:projectId", async (req, res) => {
+  const { projectId } = req.params;
+  try {
+    const [modules, pages, fields, actions, edges] = await Promise.all([
+      prisma.module.findMany({ where: { projectId, recordStatus: "未入库" } }),
+      prisma.page.findMany({ where: { projectId, recordStatus: "未入库" } }),
+      prisma.field.findMany({ where: { projectId, recordStatus: "未入库" } }),
+      prisma.action.findMany({ where: { projectId, recordStatus: "未入库" } }),
+      prisma.edge.findMany({ where: { projectId, recordStatus: "未入库" } }),
+    ]);
+
+    const allIds = new Set<string>();
+    for (const m of modules) allIds.add(m.id);
+    for (const p of pages) allIds.add(p.id);
+    for (const f of fields) allIds.add(f.id);
+    for (const a of actions) allIds.add(a.id);
+
+    // Only return edges where both endpoints are "未入库"
+    const filteredEdges = edges.filter((e) => allIds.has(e.sourceId) && allIds.has(e.targetId));
+
+    res.json({ modules, pages, fields, actions, edges: filteredEdges });
+  } catch (err) {
+    console.error("[unsaved-entities] error:", err);
+    res.status(500).json({ error: "获取失败" });
+  }
+});
+
+// ── Helpers: save "未入库" entities ──
+
+async function saveNewEntitiesWithStatus(
+  projectId: string,
+  impactResult: { newEntities: any[]; newEdges: any[] },
+  existingEntities: Array<{ id: string; name: string; type: string; module_name: string | null; page_name: string | null }>,
+) {
+  // Strip ":type" suffix from entity name (safety net for LLM output like "拓扑图绘制:page")
+  const stripSuffix = (name: string | null) => {
+    if (!name) return name;
+    return name.replace(/:(module|page|field|action)$/, "");
+  };
+
+  // Fetch all project entities for wider name-based parent resolution
+  const [extraModules, extraPages] = await Promise.all([
+    prisma.module.findMany({ where: { projectId }, select: { id: true, name: true, posX: true, posY: true } }),
+    prisma.page.findMany({ where: { projectId }, select: { id: true, name: true, moduleId: true, posX: true, posY: true } }),
+  ]);
+  const extraModuleNameToId = new Map(extraModules.map((m) => [m.name, m.id]));
+  const extraModulePos = new Map(extraModules.map((m) => [m.id, { x: m.posX, y: m.posY }]));
+  const extraPageNameToId = new Map(extraPages.map((p) => [p.name, p.id]));
+  const extraPagePos = new Map(extraPages.map((p) => [p.id, { x: p.posX, y: p.posY }]));
+
+  // Calculate child position relative to parent
+  const childPos = (parentName: string | null, idx: number, isPage: boolean): { posX: number; posY: number } => {
+    if (!parentName) return { posX: 100 + (idx % 3) * 200, posY: 200 + Math.floor(idx / 3) * 100 };
+    const parentId = extraModuleNameToId.get(parentName) || extraPageNameToId.get(parentName);
+    if (!parentId) return { posX: 100 + (idx % 3) * 200, posY: 200 + Math.floor(idx / 3) * 100 };
+    const pos = extraModulePos.get(parentId) || extraPagePos.get(parentId);
+    if (!pos) return { posX: 100 + (idx % 3) * 200, posY: 200 + Math.floor(idx / 3) * 100 };
+    const offsetX = isPage ? 20 : 16;
+    const offsetY = isPage ? 36 : 36;
+    return { posX: pos.x + offsetX, posY: pos.y + offsetY + idx * 52 };
+  };
+
+  const { newEntities, newEdges } = impactResult;
+  const nameToExistingId = new Map<string, string>();
+  for (const e of existingEntities) nameToExistingId.set(e.name, e.id);
+
+  const nameToNewId = new Map<string, string>();
+
+  // Try: new entities → existing entities → project-wide name lookup
+  const resolveParentId = (parentName: string | null) => {
+    if (!parentName) return null;
+    const cleaned = stripSuffix(parentName) || parentName;
+    return nameToNewId.get(cleaned) || nameToExistingId.get(cleaned) ||
+           extraModuleNameToId.get(cleaned) || extraPageNameToId.get(cleaned) || null;
+  };
+
+  // Auto-create missing parent entity (recursive, handles parent chains)
+  const ensureParent = async (parentName: string | null): Promise<string | null> => {
+    if (!parentName) return null;
+    const existingId = resolveParentId(parentName);
+    if (existingId) return existingId;
+    // Try finding a matching newEntity and create it
+    const candidate = newEntities.find((e: any) => e.name === stripSuffix(parentName) || e.name === parentName);
+    if (!candidate) return null;
+    if (nameToNewId.has(candidate.name)) return nameToNewId.get(candidate.name)!;
+    if (nameToExistingId.has(candidate.name)) return nameToExistingId.get(candidate.name)!;
+    // Recursively ensure grandparent first
+    if (candidate.parentName) await ensureParent(candidate.parentName);
+    // Create based on type
+    if (candidate.type === "module") {
+      const m = await prisma.module.create({
+        data: { projectId, name: candidate.name, posX: 100, posY: 100, recordStatus: "未入库" },
+      });
+      nameToNewId.set(m.name, m.id);
+      extraModuleNameToId.set(m.name, m.id);
+      extraModulePos.set(m.id, { x: m.posX, y: m.posY });
+      return m.id;
+    }
+    if (candidate.type === "page") {
+      const mid = candidate.parentName ? await ensureParent(candidate.parentName) : null;
+      const p = await prisma.page.create({
+        data: { projectId, moduleId: mid, name: candidate.name, posX: 100, posY: 100, recordStatus: "未入库" },
+      });
+      nameToNewId.set(p.name, p.id);
+      extraPageNameToId.set(p.name, p.id);
+      extraPagePos.set(p.id, { x: p.posX, y: p.posY });
+      return p.id;
+    }
+    return null;
+  };
+
+  // 1. Create modules
+  const newModules = newEntities.filter((e: any) => e.type === "module");
+  for (const m of newModules) {
+    if (nameToExistingId.has(m.name)) { nameToNewId.set(m.name, nameToExistingId.get(m.name)!); continue; }
+    const created = await prisma.module.create({
+      data: { projectId, name: m.name, posX: 100, posY: 100, recordStatus: "未入库" },
+    });
+    nameToNewId.set(m.name, created.id);
+  }
+
+  // 2. Create pages (with per-module counter for stacking)
+  const pageCountPerParent = new Map<string, number>();
+  const newPages = newEntities.filter((e: any) => e.type === "page");
+  for (const p of newPages) {
+    if (nameToExistingId.has(p.name)) { nameToNewId.set(p.name, nameToExistingId.get(p.name)!); continue; }
+    const parentKey = p.parentName || "__root__";
+    const idx = pageCountPerParent.get(parentKey) || 0;
+    pageCountPerParent.set(parentKey, idx + 1);
+    const pos = childPos(p.parentName, idx, true);
+    // Auto-create missing parent module if needed
+    const moduleId = await ensureParent(p.parentName);
+    const created = await prisma.page.create({
+      data: { projectId, moduleId, name: p.name, posX: pos.posX, posY: pos.posY, recordStatus: "未入库" },
+    });
+    nameToNewId.set(p.name, created.id);
+  }
+
+  // 3. Create fields (with per-page counter for stacking)
+  const fieldCountPerParent = new Map<string, number>();
+  const newFields = newEntities.filter((e: any) => e.type === "field");
+  for (const f of newFields) {
+    if (nameToExistingId.has(f.name)) { nameToNewId.set(f.name, nameToExistingId.get(f.name)!); continue; }
+    const parentKey = f.parentName || "__root__";
+    const idx = fieldCountPerParent.get(parentKey) || 0;
+    fieldCountPerParent.set(parentKey, idx + 1);
+    const pos = childPos(f.parentName, idx, false);
+    const pageId = await ensureParent(f.parentName);
+    const created = await prisma.field.create({
+      data: { projectId, pageId: pageId || resolveParentId(f.parentName), name: f.name, fieldType: f.fieldType || "string", posX: pos.posX, posY: pos.posY, recordStatus: "未入库" },
+    });
+    nameToNewId.set(f.name, created.id);
+  }
+
+  // 4. Create actions (with per-page counter for stacking)
+  const actionCountPerParent = new Map<string, number>();
+  const newActions = newEntities.filter((e: any) => e.type === "action");
+  for (const a of newActions) {
+    if (nameToExistingId.has(a.name)) { nameToNewId.set(a.name, nameToExistingId.get(a.name)!); continue; }
+    const parentKey = a.parentName || "__root__";
+    const idx = actionCountPerParent.get(parentKey) || 0;
+    actionCountPerParent.set(parentKey, idx + 1);
+    const pos = childPos(a.parentName, idx, false);
+    const pageId = await ensureParent(a.parentName);
+    const created = await prisma.action.create({
+      data: { projectId, pageId: pageId || resolveParentId(a.parentName), name: a.name, actionType: a.actionType || "operation", posX: pos.posX, posY: pos.posY, recordStatus: "未入库" },
+    });
+    nameToNewId.set(a.name, created.id);
+  }
+
+  // 5. Create new edges
+  for (const edge of newEdges || []) {
+    const sourceId = nameToNewId.get(edge.sourceName) || nameToExistingId.get(edge.sourceName);
+    const targetId = nameToNewId.get(edge.targetName) || nameToExistingId.get(edge.targetName);
+    if (!sourceId || !targetId) continue;
+    const exists = await prisma.edge.findFirst({ where: { projectId, sourceId, targetId } });
+    if (!exists) {
+      await prisma.edge.create({
+        data: { projectId, sourceId, targetId, label: edge.label || "影响关联", flowType: edge.flowType || "BUSINESS_FLOW", status: "extracted", recordStatus: "未入库" },
+      });
+    }
+  }
+}
+
+async function triggerVectorSync(projectId: string) {
+  try {
+    // Fetch all "未入库" entities
+    const [modules, pages, fields, actions] = await Promise.all([
+      prisma.module.findMany({ where: { projectId, recordStatus: "未入库" }, select: { id: true, name: true } }),
+      prisma.page.findMany({ where: { projectId, recordStatus: "未入库" }, select: { id: true, name: true, moduleId: true } }),
+      prisma.field.findMany({ where: { projectId, recordStatus: "未入库" }, select: { id: true, name: true, pageId: true, fieldType: true } }),
+      prisma.action.findMany({ where: { projectId, recordStatus: "未入库" }, select: { id: true, name: true, pageId: true, actionType: true } }),
+    ]);
+
+    // Fetch ALL modules/pages in the project for name-based parent resolution
+    const [allModules, allPages] = await Promise.all([
+      prisma.module.findMany({ where: { projectId }, select: { id: true, name: true } }),
+      prisma.page.findMany({ where: { projectId }, select: { id: true, name: true, moduleId: true } }),
+    ]);
+
+    // Build maps: ID→name for foreign key lookup
+    const moduleNameById = new Map(allModules.map((m) => [m.id, m.name]));
+    const pageNameById = new Map(allPages.map((p) => [p.id, p.name]));
+    const pageModuleId = new Map(allPages.map((p) => [p.id, p.moduleId]));
+
+    // Helper: resolve camelCase parent names
+    const resolveParent = (pageId: string | null) => {
+      let pageName = "";
+      let moduleName = "";
+      if (pageId) {
+        pageName = pageNameById.get(pageId) || "";
+        const parentModuleId = pageModuleId.get(pageId);
+        if (parentModuleId) moduleName = moduleNameById.get(parentModuleId) || "";
+      }
+      return { moduleName, pageName };
+    };
+
+    const entities = [
+      ...modules.map((m) => ({ id: m.id, name: m.name, type: "module" as const, moduleName: "", pageName: "" })),
+      ...pages.map((p) => ({ id: p.id, name: p.name, type: "page" as const, moduleName: p.moduleId ? moduleNameById.get(p.moduleId) || "" : "", pageName: "" })),
+      ...fields.map((f) => ({ id: f.id, name: f.name, type: "field" as const, ...resolveParent(f.pageId) })),
+      ...actions.map((a) => ({ id: a.id, name: a.name, type: "action" as const, ...resolveParent(a.pageId) })),
+    ];
+
+    if (entities.length === 0) return;
+
+    await fetch(`${N8N_BASE}/vector-sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, entities }),
+      signal: AbortSignal.timeout(60000),
+    });
+  } catch (err) {
+    console.warn("[vector-sync] trigger failed:", err);
+  }
 }
 
 export default router;

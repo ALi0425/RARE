@@ -1,5 +1,8 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { request } from "../../api/client";
+import { useCanvasStore } from "../../store/canvasStore";
+import type { ImpactPreview } from "../../store/canvasStore";
+import ImpactModal from "./ImpactModal";
 import { theme } from "../../theme/tokens";
 import Spinner from "../ui/Spinner";
 
@@ -76,6 +79,11 @@ export default function OptimizationPanel({ projectId }: Props) {
   const [entityLookup, setEntityLookup] = useState<EntityOption[]>([]);
   const [editingText, setEditingText] = useState("");
   const [isEditing, setIsEditing] = useState(false);
+  const [showImpactModal, setShowImpactModal] = useState(false);
+  const confirmedSummary = useCanvasStore((s) => s.confirmedSummary);
+  const impactReopenSignal = useCanvasStore((s) => s.impactReopenSignal);
+  const impactResult = useCanvasStore((s) => s.impactResult);
+  const setImpactResult = useCanvasStore((s) => s.setImpactResult);
 
   // Dropdown state for clicking existing entities
   const [dropdownIndex, setDropdownIndex] = useState<number | null>(null);
@@ -91,6 +99,19 @@ export default function OptimizationPanel({ projectId }: Props) {
       .then((data) => setEntityLookup(data.entities || []))
       .catch(() => {});
   }, [projectId]);
+
+  // Watch reopen signal from SmartEvaluation's "回到评估" button
+  useEffect(() => {
+    if (impactReopenSignal > 0) {
+      setShowImpactModal(true);
+    }
+  }, [impactReopenSignal]);
+
+  // When opening from "智能评估" button (not reopen), clear cached result for a fresh start
+  const handleOpenImpactModal = useCallback(() => {
+    setImpactResult(null);
+    setShowImpactModal(true);
+  }, [setImpactResult]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -203,6 +224,17 @@ export default function OptimizationPanel({ projectId }: Props) {
   }, [entityLookup]);
 
   // Reset panel
+  // Handle impact assessment apply
+  const handleImpactApply = useCallback((_project: any, _affectedIds: string[]) => {
+    setShowImpactModal(false);
+    // Reset panel state on apply
+    setState("input");
+    setSegments([]);
+    setIsEditing(false);
+    // Reload the page to show updated project data
+    window.location.reload();
+  }, []);
+
   const handleClose = useCallback(() => {
     setState("input");
     setInputText("");
@@ -218,329 +250,423 @@ export default function OptimizationPanel({ projectId }: Props) {
     setDropdownPosition(null);
   }, []);
 
+  // Handle demo: save result+preview to store and close modal
+  const setImpactPreview = useCanvasStore((s) => s.setImpactPreview);
+  const handleDemo = useCallback(async (result: ImpactPreview) => {
+    // Also fetch "未入库" data from DB and merge
+    try {
+      const unsaved = await impactApi.getUnsaved(projectId);
+      if (unsaved && unsaved.modules?.length > 0) {
+        // Build ID→name map for edge resolution
+        const idToName = new Map<string, string>();
+        for (const m of unsaved.modules) idToName.set(m.id, m.name);
+        for (const p of unsaved.pages) idToName.set(p.id, p.name);
+        for (const f of unsaved.fields) idToName.set(f.id, f.name);
+        for (const a of unsaved.actions) idToName.set(a.id, a.name);
+
+        // Merge: avoid duplicates by name+type
+        const seen = new Set<string>();
+        for (const e of result.newEntities) seen.add(`${e.name}:${e.type}`);
+
+        const addIfNew = (name: string, type: string, parentName: string | null, fieldType: string | null, actionType: string | null) => {
+          if (!seen.has(`${name}:${type}`)) {
+            result.newEntities.push({ name, type, parentName, fieldType, actionType });
+            seen.add(`${name}:${type}`);
+          }
+        };
+
+        for (const m of unsaved.modules) addIfNew(m.name, "module", null, null, null);
+        for (const p of unsaved.pages) {
+          const parentModuleName = p.moduleId ? idToName.get(p.moduleId) : null;
+          addIfNew(p.name, "page", parentModuleName, null, null);
+        }
+        for (const f of unsaved.fields) {
+          const parentPageName = f.pageId ? idToName.get(f.pageId) : null;
+          addIfNew(f.name, "field", parentPageName, f.fieldType, null);
+        }
+        for (const a of unsaved.actions) {
+          const parentPageName = a.pageId ? idToName.get(a.pageId) : null;
+          addIfNew(a.name, "action", parentPageName, null, a.actionType);
+        }
+
+        // Merge edges: convert DB IDs to names
+        if (unsaved.edges) {
+          for (const edge of unsaved.edges) {
+            const sName = idToName.get(edge.sourceId);
+            const tName = idToName.get(edge.targetId);
+            if (sName && tName) {
+              result.newEdges.push({
+                sourceName: sName,
+                targetName: tName,
+                label: edge.label || "",
+                flowType: edge.flowType || "BUSINESS_FLOW",
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // non-fatal — just use the assessment result
+    }
+    setImpactResult(result);
+    setImpactPreview(result);
+    setShowImpactModal(false);
+  }, [projectId, setImpactPreview, setImpactResult]);
+
   return (
-    <div
-      ref={panelRef}
-      style={{
-        position: "absolute",
-        bottom: 24,
-        left: "50%",
-        transform: "translateX(-50%)",
-        width: state === "result" ? "70%" : 560,
-        maxWidth: "90vw",
-        maxHeight: state === "result" ? "70vh" : "auto",
-        background: theme.colors.bg.surface,
-        border: `1px solid ${theme.colors.border.primary}`,
-        borderRadius: 16,
-        boxShadow: theme.shadow.lg,
-        zIndex: 20,
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-        transition: "width 0.2s ease, max-height 0.2s ease",
-      }}
-    >
-      {/* ── Input mode ── */}
-      {state === "input" && (
-        <>
-          {/* Text input */}
-          <textarea
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder="输入新需求描述，或上传文件..."
-            rows={3}
-            style={{
-              width: "100%",
-              minHeight: 60,
-              padding: "14px 16px",
-              border: "none",
-              background: "transparent",
-              color: theme.colors.text.primary,
-              fontSize: 13,
-              fontFamily: theme.font,
-              lineHeight: 1.5,
-              resize: "vertical",
-              outline: "none",
-              boxSizing: "border-box",
-            }}
-          />
-
-          {/* File info + actions row */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-              padding: "8px 12px",
-              borderTop: `1px solid ${theme.colors.border.subtle}`,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {/* File upload */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".txt,.md,.json,.csv,.pdf"
-                style={{ display: "none" }}
-                onChange={handleFileUpload}
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                title="上传文件"
-                style={{
-                  padding: "6px 10px",
-                  border: `1px solid ${theme.colors.border.primary}`,
-                  borderRadius: 8,
-                  background: theme.colors.bg.elevated,
-                  color: theme.colors.text.secondary,
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontFamily: theme.font,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                📎 {fileName ? "更换文件" : "上传文件"}
-              </button>
-              {fileName && (
-                <span style={{ fontSize: 11, color: theme.colors.text.tertiary, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {fileName}
-                </span>
-              )}
-              {fileWarning && (
-                <div style={{ fontSize: 11, color: theme.colors.accent.red, maxWidth: 300, lineHeight: 1.4 }}>
-                  ⚠️ {fileWarning}
-                </div>
-              )}
-            </div>
-
-            {/* Optimize button */}
-            <button
-              onClick={handleOptimize}
-              disabled={!inputText.trim() && !fileContent}
+    <>
+      <div
+        ref={panelRef}
+        style={{
+          position: "absolute",
+          bottom: 24,
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: state === "result" ? "70%" : 560,
+          maxWidth: "90vw",
+          maxHeight: state === "result" ? "70vh" : "auto",
+          background: theme.colors.bg.surface,
+          border: `1px solid ${theme.colors.border.primary}`,
+          borderRadius: 16,
+          boxShadow: theme.shadow.lg,
+          zIndex: 20,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          transition: "width 0.2s ease, max-height 0.2s ease",
+        }}
+      >
+        {/* ── Input mode ── */}
+        {state === "input" && (
+          <>
+            {/* Text input */}
+            <textarea
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="输入新需求描述，或上传文件..."
+              rows={3}
               style={{
-                padding: "8px 20px",
+                width: "100%",
+                minHeight: 60,
+                padding: "14px 16px",
                 border: "none",
-                borderRadius: 10,
-                background: (inputText.trim() || fileContent) ? theme.colors.accent.module : theme.colors.bg.elevated,
-                color: (inputText.trim() || fileContent) ? "#fff" : theme.colors.text.tertiary,
-                cursor: (inputText.trim() || fileContent) ? "pointer" : "default",
+                background: "transparent",
+                color: theme.colors.text.primary,
                 fontSize: 13,
-                fontWeight: 600,
                 fontFamily: theme.font,
+                lineHeight: 1.5,
+                resize: "vertical",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+
+            {/* File info + actions row */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                padding: "8px 12px",
+                borderTop: `1px solid ${theme.colors.border.subtle}`,
               }}
             >
-              优化
-            </button>
-          </div>
-
-          {error && (
-            <div style={{ padding: "8px 16px", fontSize: 12, color: theme.colors.accent.red, borderTop: `1px solid ${theme.colors.border.subtle}` }}>
-              {error}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ── Loading mode ── */}
-      {state === "loading" && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "24px 16px" }}>
-          <Spinner />
-          <span style={{ fontSize: 13, color: theme.colors.text.secondary }}>正在优化...</span>
-        </div>
-      )}
-
-      {/* ── Result mode ── */}
-      {state === "result" && (
-        <div style={{ display: "flex", flexDirection: "column", maxHeight: "70vh" }}>
-          {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: `1px solid ${theme.colors.border.subtle}` }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: theme.colors.text.primary }}>优化结果</span>
-            <div style={{ display: "flex", gap: 6 }}>
-              {isEditing ? (
-                <button onClick={handleApplyEdit} style={{ padding: "4px 12px", border: "none", borderRadius: 8, background: theme.colors.accent.module, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: theme.font }}>
-                  应用编辑
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {/* File upload */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".txt,.md,.json,.csv,.pdf"
+                  style={{ display: "none" }}
+                  onChange={handleFileUpload}
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  title="上传文件"
+                  style={{
+                    padding: "6px 10px",
+                    border: `1px solid ${theme.colors.border.primary}`,
+                    borderRadius: 8,
+                    background: theme.colors.bg.elevated,
+                    color: theme.colors.text.secondary,
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontFamily: theme.font,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  📎 {fileName ? "更换文件" : "上传文件"}
                 </button>
-              ) : (
-                <button onClick={() => setIsEditing(true)} style={{ padding: "4px 12px", border: `1px solid ${theme.colors.border.primary}`, borderRadius: 8, background: "transparent", color: theme.colors.text.secondary, fontSize: 11, cursor: "pointer", fontFamily: theme.font }}>
-                  编辑
-                </button>
-              )}
-              <button onClick={handleClose} style={{ padding: "4px 10px", border: "none", borderRadius: 8, background: theme.colors.bg.elevated, color: theme.colors.text.tertiary, fontSize: 11, cursor: "pointer", fontFamily: theme.font }}>
-                关闭
+                {fileName && (
+                  <span style={{ fontSize: 11, color: theme.colors.text.tertiary, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {fileName}
+                  </span>
+                )}
+                {fileWarning && (
+                  <div style={{ fontSize: 11, color: theme.colors.accent.red, maxWidth: 300, lineHeight: 1.4 }}>
+                    ⚠️ {fileWarning}
+                  </div>
+                )}
+              </div>
+
+              {/* Optimize button */}
+              <button
+                onClick={handleOptimize}
+                disabled={!inputText.trim() && !fileContent}
+                style={{
+                  padding: "8px 20px",
+                  border: "none",
+                  borderRadius: 10,
+                  background: (inputText.trim() || fileContent) ? theme.colors.accent.module : theme.colors.bg.elevated,
+                  color: (inputText.trim() || fileContent) ? "#fff" : theme.colors.text.tertiary,
+                  cursor: (inputText.trim() || fileContent) ? "pointer" : "default",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  fontFamily: theme.font,
+                }}
+              >
+                优化
               </button>
             </div>
-          </div>
 
-          {/* Content area */}
-          <div style={{ flex: 1, overflow: "auto", padding: 14 }}>
-            {isEditing ? (
-              <textarea
-                value={editingText}
-                onChange={(e) => handleEditChange(e.target.value)}
-                style={{
-                  width: "100%",
-                  minHeight: 120,
-                  padding: 10,
-                  border: `1px solid ${theme.colors.border.primary}`,
-                  borderRadius: 8,
-                  background: theme.colors.bg.app,
-                  color: theme.colors.text.primary,
-                  fontSize: 13,
-                  fontFamily: "monospace",
-                  lineHeight: 1.6,
-                  resize: "vertical",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
-              />
-            ) : (
-              <div style={{ fontSize: 13, lineHeight: 1.8, color: theme.colors.text.primary, whiteSpace: "pre-wrap" }}>
-                {segments.map((seg, i) => {
-                  if (seg.type === "text") {
-                    return <span key={i}>{seg.text}</span>;
-                  }
-                  if (seg.type === "existing") {
-                    const matched = entityLookup.find((e) => e.name === seg.name && e.type === seg.kind);
-                    return (
-                      <span key={i} style={{ display: "inline" }}>
-                        <span
-                          ref={(el) => { if (el) entityRefs.current.set(i, el); else entityRefs.current.delete(i); }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (dropdownIndex === i) {
-                              setDropdownIndex(null);
-                              setDropdownPosition(null);
-                            } else {
-                              const el = entityRefs.current.get(i);
-                              if (el) {
-                                const rect = el.getBoundingClientRect();
-                                setDropdownPosition({ top: rect.bottom + 4, left: rect.left });
+            {error && (
+              <div style={{ padding: "8px 16px", fontSize: 12, color: theme.colors.accent.red, borderTop: `1px solid ${theme.colors.border.subtle}` }}>
+                {error}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Loading mode ── */}
+        {state === "loading" && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "24px 16px" }}>
+            <Spinner />
+            <span style={{ fontSize: 13, color: theme.colors.text.secondary }}>正在优化...</span>
+          </div>
+        )}
+
+        {/* ── Result mode ── */}
+        {state === "result" && (
+          <div style={{ display: "flex", flexDirection: "column", maxHeight: "70vh" }}>
+            {/* Header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: `1px solid ${theme.colors.border.subtle}` }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: theme.colors.text.primary }}>优化结果</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                {isEditing ? (
+                  <button onClick={handleApplyEdit} style={{ padding: "4px 12px", border: "none", borderRadius: 8, background: theme.colors.accent.module, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: theme.font }}>
+                    应用编辑
+                  </button>
+                ) : (
+                  <button onClick={() => setIsEditing(true)} style={{ padding: "4px 12px", border: `1px solid ${theme.colors.border.primary}`, borderRadius: 8, background: "transparent", color: theme.colors.text.secondary, fontSize: 11, cursor: "pointer", fontFamily: theme.font }}>
+                    编辑
+                  </button>
+                )}
+                <button onClick={handleClose} style={{ padding: "4px 10px", border: "none", borderRadius: 8, background: theme.colors.bg.elevated, color: theme.colors.text.tertiary, fontSize: 11, cursor: "pointer", fontFamily: theme.font }}>
+                  关闭
+                </button>
+              </div>
+            </div>
+
+            {/* Content area */}
+            <div style={{ flex: 1, overflow: "auto", padding: 14 }}>
+              {isEditing ? (
+                <textarea
+                  value={editingText}
+                  onChange={(e) => handleEditChange(e.target.value)}
+                  style={{
+                    width: "100%",
+                    minHeight: 120,
+                    padding: 10,
+                    border: `1px solid ${theme.colors.border.primary}`,
+                    borderRadius: 8,
+                    background: theme.colors.bg.app,
+                    color: theme.colors.text.primary,
+                    fontSize: 13,
+                    fontFamily: "monospace",
+                    lineHeight: 1.6,
+                    resize: "vertical",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+              ) : (
+                <div style={{ fontSize: 13, lineHeight: 1.8, color: theme.colors.text.primary, whiteSpace: "pre-wrap" }}>
+                  {segments.map((seg, i) => {
+                    if (seg.type === "text") {
+                      return <span key={i}>{seg.text}</span>;
+                    }
+                    if (seg.type === "existing") {
+                      const matched = entityLookup.find((e) => e.name === seg.name && e.type === seg.kind);
+                      return (
+                        <span key={i} style={{ display: "inline" }}>
+                          <span
+                            ref={(el) => { if (el) entityRefs.current.set(i, el); else entityRefs.current.delete(i); }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (dropdownIndex === i) {
+                                setDropdownIndex(null);
+                                setDropdownPosition(null);
+                              } else {
+                                const el = entityRefs.current.get(i);
+                                if (el) {
+                                  const rect = el.getBoundingClientRect();
+                                  setDropdownPosition({ top: rect.bottom + 4, left: rect.left });
+                                }
+                                setDropdownIndex(i);
                               }
-                              setDropdownIndex(i);
-                            }
-                          }}
+                            }}
+                            style={{
+                              display: "inline-block",
+                              padding: "1px 8px",
+                              margin: "0 2px",
+                              borderRadius: 4,
+                              background: `${theme.colors.accent.module}25`,
+                              border: `1px solid ${theme.colors.accent.module}50`,
+                              color: theme.colors.accent.module,
+                              fontSize: 12,
+                              fontWeight: 500,
+                              cursor: "pointer",
+                            }}
+                            title={matched ? `${seg.name} (${seg.kind})` : `未匹配: ${seg.name}`}
+                          >
+                             {seg.name}:{seg.kind}
+                          </span>
+
+                          {/* Dropdown for entity replacement */}
+                          {dropdownIndex === i && dropdownPosition && (
+                            <div
+                              data-dropdown
+                              style={{
+                                position: "fixed",
+                                top: dropdownPosition.top,
+                                left: dropdownPosition.left,
+                                zIndex: 1000,
+                                minWidth: 200,
+                                maxHeight: 200,
+                                overflow: "auto",
+                                background: theme.colors.bg.elevated,
+                                border: `1px solid ${theme.colors.border.primary}`,
+                                borderRadius: 8,
+                                boxShadow: theme.shadow.md,
+                                padding: 4,
+                              }}
+                            >
+                              <div style={{ padding: "4px 8px", fontSize: 10, color: theme.colors.text.tertiary, borderBottom: `1px solid ${theme.colors.border.subtle}`, marginBottom: 4 }}>
+                                选择要替换的实体:
+                              </div>
+                              {filterLookup(seg.kind).length === 0 && (
+                                <div style={{ padding: "6px 8px", fontSize: 11, color: theme.colors.text.tertiary }}>
+                                  无匹配的{seg.kind}实体
+                                </div>
+                              )}
+                              {filterLookup(seg.kind).map((entity) => (
+                                <div
+                                  key={entity.id}
+                                  onClick={() => handleReplaceEntity(i, entity)}
+                                  style={{
+                                    padding: "6px 8px",
+                                    borderRadius: 4,
+                                    cursor: "pointer",
+                                    fontSize: 12,
+                                    color: entity.name === seg.name ? theme.colors.accent.module : theme.colors.text.primary,
+                                    background: entity.name === seg.name ? `${theme.colors.accent.module}15` : "transparent",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                  }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.background = theme.colors.bg.hover)}
+                                  onMouseLeave={(e) => (e.currentTarget.style.background = entity.name === seg.name ? `${theme.colors.accent.module}15` : "transparent")}
+                                >
+                                  <span style={{ fontWeight: entity.name === seg.name ? 600 : 400 }}>{entity.name}</span>
+                                  <span style={{ fontSize: 10, color: theme.colors.text.tertiary }}>{entity.type}</span>
+                                  {entity.name === seg.name && <span style={{ fontSize: 10, color: theme.colors.accent.module, marginLeft: "auto" }}>当前</span>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </span>
+                      );
+                    }
+                    if (seg.type === "new") {
+                      return (
+                        <span
+                          key={i}
                           style={{
                             display: "inline-block",
                             padding: "1px 8px",
                             margin: "0 2px",
                             borderRadius: 4,
-                            background: `${theme.colors.accent.module}25`,
-                            border: `1px solid ${theme.colors.accent.module}50`,
-                            color: theme.colors.accent.module,
+                            background: `${theme.colors.accent.page}20`,
+                            border: `1px solid ${theme.colors.accent.page}50`,
+                            color: theme.colors.accent.page,
                             fontSize: 12,
                             fontWeight: 500,
-                            cursor: "pointer",
                           }}
-                          title={matched ? `${seg.name} (${seg.kind})` : `未匹配: ${seg.name}`}
+                          title={`新${seg.kind}: ${seg.name}`}
                         >
-                           {seg.name}:{seg.kind}
+                          {seg.name}:{seg.kind}
                         </span>
+                      );
+                    }
+                    return null;
+                  })}
+                </div>
+              )}
+            </div>
 
-                        {/* Dropdown for entity replacement */}
-                        {dropdownIndex === i && dropdownPosition && (
-                          <div
-                            data-dropdown
-                            style={{
-                              position: "fixed",
-                              top: dropdownPosition.top,
-                              left: dropdownPosition.left,
-                              zIndex: 1000,
-                              minWidth: 200,
-                              maxHeight: 200,
-                              overflow: "auto",
-                              background: theme.colors.bg.elevated,
-                              border: `1px solid ${theme.colors.border.primary}`,
-                              borderRadius: 8,
-                              boxShadow: theme.shadow.md,
-                              padding: 4,
-                            }}
-                          >
-                            <div style={{ padding: "4px 8px", fontSize: 10, color: theme.colors.text.tertiary, borderBottom: `1px solid ${theme.colors.border.subtle}`, marginBottom: 4 }}>
-                              选择要替换的实体:
-                            </div>
-                            {filterLookup(seg.kind).length === 0 && (
-                              <div style={{ padding: "6px 8px", fontSize: 11, color: theme.colors.text.tertiary }}>
-                                无匹配的{seg.kind}实体
-                              </div>
-                            )}
-                            {filterLookup(seg.kind).map((entity) => (
-                              <div
-                                key={entity.id}
-                                onClick={() => handleReplaceEntity(i, entity)}
-                                style={{
-                                  padding: "6px 8px",
-                                  borderRadius: 4,
-                                  cursor: "pointer",
-                                  fontSize: 12,
-                                  color: entity.name === seg.name ? theme.colors.accent.module : theme.colors.text.primary,
-                                  background: entity.name === seg.name ? `${theme.colors.accent.module}15` : "transparent",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 6,
-                                }}
-                                onMouseEnter={(e) => (e.currentTarget.style.background = theme.colors.bg.hover)}
-                                onMouseLeave={(e) => (e.currentTarget.style.background = entity.name === seg.name ? `${theme.colors.accent.module}15` : "transparent")}
-                              >
-                                <span style={{ fontWeight: entity.name === seg.name ? 600 : 400 }}>{entity.name}</span>
-                                <span style={{ fontSize: 10, color: theme.colors.text.tertiary }}>{entity.type}</span>
-                                {entity.name === seg.name && <span style={{ fontSize: 10, color: theme.colors.accent.module, marginLeft: "auto" }}>当前</span>}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </span>
-                    );
-                  }
-                  if (seg.type === "new") {
-                    return (
-                      <span
-                        key={i}
-                        style={{
-                          display: "inline-block",
-                          padding: "1px 8px",
-                          margin: "0 2px",
-                          borderRadius: 4,
-                          background: `${theme.colors.accent.page}20`,
-                          border: `1px solid ${theme.colors.accent.page}50`,
-                          color: theme.colors.accent.page,
-                          fontSize: 12,
-                          fontWeight: 500,
-                        }}
-                        title={`新${seg.kind}: ${seg.name}`}
-                      >
-                        {seg.name}:{seg.kind}
-                      </span>
-                    );
-                  }
-                  return null;
-                })}
-              </div>
-            )}
+            {/* Bottom buttons */}
+            <div style={{ padding: "8px 14px", borderTop: `1px solid ${theme.colors.border.subtle}`, display: "flex", justifyContent: "center", gap: 8 }}>
+              <button
+                onClick={() => { setState("input"); setSegments([]); setIsEditing(false); }}
+                style={{
+                  padding: "6px 16px",
+                  border: `1px solid ${theme.colors.border.primary}`,
+                  borderRadius: 8,
+                  background: "transparent",
+                  color: theme.colors.text.secondary,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  fontFamily: theme.font,
+                }}
+              >
+                重新优化
+              </button>
+              <button
+                onClick={handleOpenImpactModal}
+                style={{
+                  padding: "6px 16px",
+                  border: "none",
+                  borderRadius: 8,
+                  background: "#7c3aed",
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: theme.font,
+                }}
+              >
+                智能评估
+              </button>
+            </div>
           </div>
+        )}
+      </div>
 
-          {/* Re-optimize button at bottom */}
-          <div style={{ padding: "8px 14px", borderTop: `1px solid ${theme.colors.border.subtle}`, display: "flex", justifyContent: "center" }}>
-            <button
-              onClick={() => { setState("input"); setSegments([]); setIsEditing(false); }}
-              style={{
-                padding: "6px 16px",
-                border: `1px solid ${theme.colors.border.primary}`,
-                borderRadius: 8,
-                background: "transparent",
-                color: theme.colors.text.secondary,
-                fontSize: 12,
-                cursor: "pointer",
-                fontFamily: theme.font,
-              }}
-            >
-              重新优化
-            </button>
-          </div>
-        </div>
+      {/* ── Impact Assessment Modal (outside transform container) ── */}
+      {showImpactModal && (
+        <ImpactModal
+          projectId={projectId}
+          refinedText={editingText}
+          projectSummary={confirmedSummary || undefined}
+          initialResult={impactResult}
+          onClose={() => { setImpactResult(null); setShowImpactModal(false); }}
+          onApply={handleImpactApply}
+          onDemo={handleDemo}
+        />
       )}
-    </div>
+    </>
   );
 }

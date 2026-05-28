@@ -66,3 +66,16 @@ export const confirmApi = {
       body: JSON.stringify({ entities }),
     }),
 };
+
+export const impactApi = {
+  assess: (pid: string, data: { refinedText: string; selectedModule?: string; projectSummary?: string }) =>
+    request<any>(`/inference/impact`, { method: "POST", body: JSON.stringify({ projectId: pid, ...data }) }),
+  apply: (pid: string, impactResult: any) =>
+    request<{ project: any; affectedIds: string[] }>(`/inference/apply-impact`, { method: "POST", body: JSON.stringify({ projectId: pid, impactResult }) }),
+  applyStatus: (pid: string) =>
+    request<any>(`/inference/apply-impact-status`, { method: "POST", body: JSON.stringify({ projectId: pid }) }),
+  cancelEntities: (pid: string) =>
+    request<any>(`/inference/cancel-impact-entities`, { method: "DELETE", body: JSON.stringify({ projectId: pid }) }),
+  getUnsaved: (pid: string) =>
+    request<any>(`/inference/unsaved-entities/${pid}`),
+};

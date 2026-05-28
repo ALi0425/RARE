@@ -29,13 +29,14 @@ model Project {
 }
 
 model Module {
-  id        String   @id @default(uuid())
-  projectId String   @map("project_id")
-  name      String
-  posX      Float    @default(0) @map("pos_x")
-  posY      Float    @default(0) @map("pos_y")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  name         String
+  posX         Float    @default(0) @map("pos_x")
+  posY         Float    @default(0) @map("pos_y")
+  recordStatus String   @default("已入库") @map("record_status")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   pages   Page[]
@@ -44,14 +45,15 @@ model Module {
 }
 
 model Page {
-  id        String   @id @default(uuid())
-  projectId String   @map("project_id")
-  moduleId  String?  @map("module_id")
-  name      String
-  posX      Float    @default(0) @map("pos_x")
-  posY      Float    @default(0) @map("pos_y")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  moduleId     String?  @map("module_id")
+  name         String
+  posX         Float    @default(0) @map("pos_x")
+  posY         Float    @default(0) @map("pos_y")
+  recordStatus String   @default("已入库") @map("record_status")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   module  Module? @relation(fields: [moduleId], references: [id])
@@ -62,15 +64,16 @@ model Page {
 }
 
 model Field {
-  id        String   @id @default(uuid())
-  projectId String   @map("project_id")
-  pageId    String?  @map("page_id")
-  name      String
-  fieldType String   @default("string") @map("field_type")
-  posX      Float    @default(0) @map("pos_x")
-  posY      Float    @default(0) @map("pos_y")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  pageId       String?  @map("page_id")
+  name         String
+  fieldType    String   @default("string") @map("field_type")
+  posX         Float    @default(0) @map("pos_x")
+  posY         Float    @default(0) @map("pos_y")
+  recordStatus String   @default("已入库") @map("record_status")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   page        Page?       @relation(fields: [pageId], references: [id])
@@ -80,15 +83,16 @@ model Field {
 }
 
 model Action {
-  id          String   @id @default(uuid())
-  projectId   String   @map("project_id")
-  pageId      String?  @map("page_id")
-  name        String
-  actionType  String   @default("operation") @map("action_type")
-  posX        Float    @default(0) @map("pos_x")
-  posY        Float    @default(0) @map("pos_y")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  pageId       String?  @map("page_id")
+  name         String
+  actionType   String   @default("operation") @map("action_type")
+  posX         Float    @default(0) @map("pos_x")
+  posY         Float    @default(0) @map("pos_y")
+  recordStatus String   @default("已入库") @map("record_status")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   page        Page?       @relation(fields: [pageId], references: [id])
@@ -98,16 +102,17 @@ model Action {
 }
 
 model Edge {
-  id          String   @id @default(uuid())
-  projectId   String   @map("project_id")
-  sourceId    String   @map("source_id")
-  targetId    String   @map("target_id")
-  label       String?
-  sourceQuote String?  @map("source_quote")
-  flowType    String   @default("BUSINESS_FLOW") @map("flow_type")
-  status      String   @default("extracted")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  sourceId     String   @map("source_id")
+  targetId     String   @map("target_id")
+  label        String?
+  sourceQuote  String?  @map("source_quote")
+  flowType     String   @default("BUSINESS_FLOW") @map("flow_type")
+  status       String   @default("extracted")
+  recordStatus String   @default("已入库") @map("record_status")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 

@@ -12,6 +12,28 @@ import { theme } from "../theme/tokens";
 
 // ── Types ──
 
+export interface ImpactPreview {
+  impactDescription: string;
+  newEntities: Array<{
+    name: string;
+    type: string;
+    parentName: string | null;
+    fieldType: string | null;
+    actionType: string | null;
+  }>;
+  affectedEntities: Array<{
+    name: string;
+    type: string;
+    impact: string;
+  }>;
+  newEdges: Array<{
+    sourceName: string;
+    targetName: string;
+    label: string;
+    flowType: string;
+  }>;
+}
+
 export interface DiffState {
   greenIds: string[];
   redIds: string[];
@@ -41,6 +63,9 @@ interface CanvasStore {
   loading: boolean;
   error: string | null;
   diffState: DiffState | null;
+  impactPreview: ImpactPreview | null;
+  impactResult: ImpactPreview | null;
+  impactReopenSignal: number;
   loadKey: number;
   viewportCenter: { x: number; y: number } | null;
 
@@ -54,6 +79,9 @@ interface CanvasStore {
   loadProject: (id: string) => Promise<void>;
   applyDiff: (diff: DiffState) => void;
   clearDiff: () => void;
+  setImpactPreview: (preview: ImpactPreview | null) => void;
+  setImpactResult: (result: ImpactPreview | null) => void;
+  triggerReopenModal: () => void;
   reset: () => void;
   collectPositions: () => { modules: any[]; pages: any[]; fields: any[]; actions: any[] };
 }
@@ -295,6 +323,9 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   loading: false,
   error: null,
   diffState: null,
+  impactPreview: null,
+  impactResult: null,
+  impactReopenSignal: 0,
   loadKey: 0,
   viewportCenter: null,
 
@@ -390,6 +421,21 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     });
   },
 
+  setImpactPreview: (preview) => {
+    set({ impactPreview: preview, impactReopenSignal: 0 });
+  },
+
+  setImpactResult: (result) => {
+    set({ impactResult: result });
+  },
+
+  triggerReopenModal: () => {
+    set((state) => ({
+      impactPreview: null,
+      impactReopenSignal: state.impactReopenSignal + 1,
+    }));
+  },
+
   reset: () =>
     set({
       nodes: [],
@@ -401,6 +447,9 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       loading: false,
       error: null,
       diffState: null,
+      impactPreview: null,
+      impactResult: null,
+      impactReopenSignal: 0,
       loadKey: 0,
       viewportCenter: null,
     }),

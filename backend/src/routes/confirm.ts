@@ -39,6 +39,19 @@ router.post("/:projectId", async (req, res) => {
   }
   sendSSE(res, { stage: "saving", progress: 15, message: "位置保存完成" });
 
+  // Set recordStatus = "已入库" for all entities after confirm
+  try {
+    await Promise.all([
+      prisma.module.updateMany({ where: { projectId, recordStatus: "未入库" }, data: { recordStatus: "已入库" } }),
+      prisma.page.updateMany({ where: { projectId, recordStatus: "未入库" }, data: { recordStatus: "已入库" } }),
+      prisma.field.updateMany({ where: { projectId, recordStatus: "未入库" }, data: { recordStatus: "已入库" } }),
+      prisma.action.updateMany({ where: { projectId, recordStatus: "未入库" }, data: { recordStatus: "已入库" } }),
+      prisma.edge.updateMany({ where: { projectId, recordStatus: "未入库" }, data: { recordStatus: "已入库" } }),
+    ]);
+  } catch (err) {
+    console.warn("set-recordStatus failed:", err);
+  }
+
   // ── Step 2: Vector sync (progress 15-50%) ──
   sendSSE(res, { stage: "vector_sync", progress: 15, message: "同步向量数据库..." });
   try {
