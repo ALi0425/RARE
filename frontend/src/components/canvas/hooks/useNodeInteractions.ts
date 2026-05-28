@@ -109,6 +109,97 @@ async function updateEntityPosition(
   }
 }
 
+// ── Sibling overlap resolution ──
+
+function resolveSiblingOverlap(nodes: Node[], draggedId: string): Node[] {
+  const GAP = 8;
+  const dragged = nodes.find((n) => n.id === draggedId);
+  if (!dragged) return nodes;
+
+  const isLeaf = (t?: string) => t === "field" || t === "action";
+  const siblings = nodes.filter(
+    (n) =>
+      n.id !== draggedId &&
+      n.parentId === dragged.parentId &&
+      (!dragged.parentId
+        ? n.type === dragged.type
+        : isLeaf(n.type) === isLeaf(dragged.type)),
+  );
+  if (siblings.length === 0) return nodes;
+
+  const getH = (n: Node) =>
+    Number(n.style?.height) || (n.type === "page" || n.type === "module" ? 36 : 52);
+  const getW = (n: Node) =>
+    Number(n.style?.width) || (n.type === "module" ? 160 : n.type === "page" ? 120 : 140);
+
+  const rectsOverlap = (a: Node, b: Node) => {
+    const aw = getW(a), ah = getH(a), bw = getW(b), bh = getH(b);
+    return (
+      a.position.x < b.position.x + bw &&
+      a.position.x + aw > b.position.x &&
+      a.position.y < b.position.y + bh &&
+      a.position.y + ah > b.position.y
+    );
+  };
+
+  if (!siblings.some((s) => rectsOverlap(dragged, s))) return nodes;
+
+  // Reflow: push down any sibling that overlaps, then cascade check
+  let result = [...nodes];
+  for (let iter = 0; iter < 30; iter++) {
+    let anyChange = false;
+
+    // Check dragged vs each sibling
+    const curDragged = result.find((n) => n.id === draggedId)!;
+    const dh = getH(curDragged), dw = getW(curDragged);
+    for (const sib of siblings) {
+      const cur = result.find((n) => n.id === sib.id)!;
+      const sh = getH(cur), sw = getW(cur);
+      const overlapX =
+        curDragged.position.x < cur.position.x + sw &&
+        curDragged.position.x + dw > cur.position.x;
+      const overlapY =
+        curDragged.position.y < cur.position.y + sh &&
+        curDragged.position.y + dh > cur.position.y;
+      if (overlapX && overlapY) {
+        const newY = Math.round(curDragged.position.y + dh + GAP);
+        if (newY > cur.position.y) {
+          result = result.map((n) =>
+            n.id === sib.id ? { ...n, position: { ...n.position, y: newY } } : n,
+          );
+          anyChange = true;
+        }
+      }
+    }
+
+    // Check sibling vs sibling (cascade)
+    const sortedSibs = siblings
+      .map((s) => result.find((n) => n.id === s.id)!)
+      .sort((a, b) => a.position.y - b.position.y);
+    for (let i = 0; i < sortedSibs.length - 1; i++) {
+      const a = sortedSibs[i], b = sortedSibs[i + 1];
+      const ah = getH(a), aw = getW(a), bh = getH(b), bw = getW(b);
+      const overlapX =
+        a.position.x < b.position.x + bw && a.position.x + aw > b.position.x;
+      const overlapY =
+        a.position.y < b.position.y + bh && a.position.y + ah > b.position.y;
+      if (overlapX && overlapY) {
+        const newY = Math.round(a.position.y + ah + GAP);
+        if (newY > b.position.y) {
+          result = result.map((n) =>
+            n.id === b.id ? { ...n, position: { ...n.position, y: newY } } : n,
+          );
+          anyChange = true;
+        }
+      }
+    }
+
+    if (!anyChange) break;
+  }
+
+  return result;
+}
+
 // ── Hook ──
 
 export function useNodeInteractions(projectId: string) {
@@ -457,6 +548,13 @@ export function useNodeInteractions(projectId: string) {
               : n,
           );
         }
+      }
+
+      // ── Resolve sibling overlap (push down any overlapped siblings) ──
+      const overlapResolved = resolveSiblingOverlap(updatedNodes, node.id);
+      if (overlapResolved !== updatedNodes) {
+        updatedNodes = overlapResolved;
+        if (node.parentId) parentsToResize.add(node.parentId);
       }
 
       // ── Auto-resize affected parent containers ──
